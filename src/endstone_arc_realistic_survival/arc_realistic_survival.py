@@ -34,11 +34,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
     permissions = {
         "arc_realistic_survival.command.config": {
             "description": "允许打开生存配置面板",
-            "default": True
+            "default": "op"
         },
         "arc_realistic_survival.command.debug": {
             "description": "允许使用调试命令",
-            "default": True
+            "default": "op"
         }
     }
 
