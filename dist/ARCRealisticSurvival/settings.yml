@@ -1,0 +1,5 @@
+language=CN
+thirst_decay_per_second=0.1
+thirst_moving_multiplier=2.0
+thirst_initial=100.0
+

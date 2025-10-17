@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "endstone_arc_realistic_survival"
+version = "0.1.0"
+dependencies = []
+authors = [
+    { name = "DEVILENMO", email = "DEVILENMO@gmail.com" },
+]
+description = "ARC Realistic Survival - 生存插件：口渴值、物品效果等"
+readme = "README.md"
+license = { file = "LICENSE" }
+keywords = ["endstone", "plugin", "survival", "thirst", "arc"]
+
+[project.urls]
+Homepage = "https://github.com/DEVILENMO/EndstoneMC-ARC-Button-Shop-Plugin"
+
+[project.entry-points."endstone"]
+arc_realistic_survival = "endstone_arc_realistic_survival:ARCRealisticSurvivalPlugin"

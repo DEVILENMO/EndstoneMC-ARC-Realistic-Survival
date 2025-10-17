@@ -1,0 +1,15 @@
+# ARC Realistic Survival English language file
+# key=value (missing keys will be appended at runtime)
+
+# Thirst System (samples)
+THIRST_PREFIX=[Thirst]
+THIRST_VALUE=Current Thirst: {value}
+THIRST_DECREASED=Your thirst decreased by {amount}
+THIRST_INCREASED=Your thirst increased by {amount}
+THIRST_LOW_WARNING=Your thirst is low. Drink something!
+THIRST_EFFECT_APPLIED=Effect applied: {effect} for {seconds} seconds
+
+# Tips/Errors (samples)
+PLAYER_ONLY_COMMAND=This command is for players only
+SHOP_PANEL_ERROR=Failed to open panel. Try again later
+

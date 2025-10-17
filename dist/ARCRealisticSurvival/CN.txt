@@ -1,0 +1,82 @@
+# ARC Realistic Survival 中文语言文件
+# 键=值（支持运行时自动追加缺失键）
+
+# 口渴系统
+THIRST_PREFIX=[口渴]
+THIRST_VALUE=当前口渴值: {value}
+THIRST_DECREASED=你的口渴值减少了 {amount}
+THIRST_INCREASED=你的口渴值增加了 {amount}
+THIRST_LOW_WARNING=你的口渴值过低，请尽快补充水分！
+THIRST_EFFECT_APPLIED=获得效果: {effect} 持续 {seconds} 秒
+
+# 配置面板
+CONFIG_PANEL_TITLE=ARC Realistic Survival 配置
+CONFIG_PANEL_DESCRIPTION=选择要进行的操作:
+CONFIG_THIRST_SETTINGS=口渴系统配置
+RELOAD_CONFIG=重载配置
+MANAGE_THIRST_ITEMS=管理物品口渴值设定
+
+# 口渴配置
+THIRST_CONFIG_TITLE=口渴系统配置
+CONFIG_DESCRIPTION=修改后提交即写入配置并热重载
+CONFIG_UNITS=单位: 数值/倍数/整数
+THIRST_DECAY_PER_SECOND=thirst_decay_per_second
+THIRST_DECAY_PLACEHOLDER=每秒衰减的口渴值
+THIRST_MOVING_MULTIPLIER=thirst_moving_multiplier
+THIRST_MOVING_PLACEHOLDER=移动时衰减倍数(>=1.0)
+THIRST_INITIAL=thirst_initial
+THIRST_INITIAL_PLACEHOLDER=初始口渴值(0-100)
+
+# 错误信息
+ERROR_DECAY_NEGATIVE=decay < 0
+ERROR_MULTIPLIER_TOO_LOW=moving multiplier < 1.0
+ERROR_INITIAL_OUT_OF_RANGE=initial out of [0,100]
+
+# 配置保存
+CONFIG_SAVED=[ARS] 配置已保存并重载
+CONFIG_SAVE_FAILED=[ARS] 配置提交失败
+CONFIG_RELOADED=[ARS] 配置与物品效果已重载
+
+# 物品管理
+ITEMS_MANAGEMENT_TITLE=物品口渴值管理
+ITEMS_MANAGEMENT_DESCRIPTION=选择要进行的操作:
+VIEW_CONFIGURED_ITEMS=查看已配置物品
+ADD_ITEM_FROM_INVENTORY=从背包添加物品
+BACK=返回
+
+# 背包物品
+INVENTORY_ITEMS_TITLE=背包物品
+NO_ITEMS_IN_INVENTORY=背包中没有物品
+SELECT_ITEM_TO_CONFIG=选择要配置口渴效果的物品:
+
+# 已配置物品
+CONFIGURED_ITEMS_TITLE=已配置物品
+CONFIGURED_ITEMS_DESCRIPTION=已配置口渴效果的物品:
+NO_CONFIGURED_ITEMS=暂无配置物品
+
+# 物品配置
+ITEM_CONFIG_TITLE=配置物品口渴效果
+ITEM_NAME=物品
+THIRST_DELTA=口渴值变化
+THIRST_DELTA_PLACEHOLDER=输入口渴值变化量 (正数增加，负数减少)
+BUFF_NAMES=Buff名称 (可选)
+BUFF_NAMES_PLACEHOLDER=输入Buff名称，多个用逗号分隔
+BUFF_DURATIONS=Buff持续时间 (可选)
+BUFF_DURATIONS_PLACEHOLDER=输入Buff持续时间(秒)，多个用逗号分隔
+
+# 物品操作
+ITEM_CONFIGURED=[ARS] 已配置物品
+THIRST_EFFECT=的口渴效果
+CONFIG_FAILED=[ARS] 配置失败
+ITEM_NOT_EXISTS=[ARS] 物品不存在
+ITEM_UPDATED=[ARS] 已更新物品
+UPDATE_FAILED=[ARS] 更新失败
+
+# 编辑物品
+EDIT_ITEM_TITLE=编辑物品口渴效果
+
+# 提示/错误
+PLAYER_ONLY_COMMAND=该命令仅限玩家使用
+NO_PERMISSION=没有权限
+SHOP_PANEL_ERROR=面板打开失败，请稍后重试
+
