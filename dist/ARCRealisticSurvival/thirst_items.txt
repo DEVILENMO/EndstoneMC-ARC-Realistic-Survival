@@ -1,0 +1,11 @@
+# 物品|口渴值变动|效果(可选)|持续秒(可选)
+# 正数为恢复口渴，负数为降低口渴
+# 名称匹配使用 item.type 或 item.name 的大写字符串
+
+COOKED_BEEF|-10
+BREAD|8
+APPLE|5
+WATER_BUCKET|30
+POTION|20|REGENERATION|10
+COLA|50|SPEED|30
+

@@ -1,0 +1,15 @@
+# ARC Realistic Survival 中文语言文件
+# 键=值（支持运行时自动追加缺失键）
+
+# 口渴系统（示例）
+THIRST_PREFIX=[口渴]
+THIRST_VALUE=当前口渴值: {value}
+THIRST_DECREASED=你的口渴值减少了 {amount}
+THIRST_INCREASED=你的口渴值增加了 {amount}
+THIRST_LOW_WARNING=你的口渴值过低，请尽快补充水分！
+THIRST_EFFECT_APPLIED=获得效果: {effect} 持续 {seconds} 秒
+
+# 提示/错误（示例）
+PLAYER_ONLY_COMMAND=该命令仅限玩家使用
+SHOP_PANEL_ERROR=面板打开失败，请稍后重试
+
