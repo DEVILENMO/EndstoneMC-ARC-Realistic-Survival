@@ -80,7 +80,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._init_default_settings()
         
         # 初始化数据库管理器（仅生存相关）
-        db_path = os.path.join("ARCRealisticSurvival", "ars_survival.db")
+        db_path = os.path.join("plugins", "ARCRealisticSurvival", "ars_survival.db")
         self.db_manager = DatabaseManager(db_path)
         
         # 创建表（仅生存相关）
@@ -288,14 +288,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.setting_manager.SetSetting("thirst_tick_seconds", "10")
                 self.thirst_tick_seconds = 10
             else:
-                self.thirst_tick_seconds = max(1, int(val))
+                self.thirst_tick_seconds = max(1, int(float(val)))
 
             val = self.setting_manager.GetSetting("thirst_decay_per_tick")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_decay_per_tick", "1")
                 self.thirst_decay_per_tick = 1
             else:
-                self.thirst_decay_per_tick = max(0, int(val))
+                self.thirst_decay_per_tick = max(0, int(float(val)))
 
             val = self.setting_manager.GetSetting("thirst_moving_multiplier")
             if val is None or val == "":
@@ -309,13 +309,13 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.setting_manager.SetSetting("thirst_initial", "100")
                 self.thirst_initial = 100
             else:
-                self.thirst_initial = int(val)
+                self.thirst_initial = int(float(val))
         except Exception as e:
             self._safe_log('error', f"[ARCRealisticSurvival] load thirst settings error: {e}")
 
     def _load_thirst_items_config(self) -> None:
         # 文件格式： 物品-口渴变动int-效果string-持续时间int，可缺省后两者
-        config_path = os.path.join("ARCRealisticSurvival", "thirst_items.txt")
+        config_path = os.path.join("plugins", "ARCRealisticSurvival", "thirst_items.txt")
         self.thirst_items_map = {}
         try:
             if not os.path.exists(os.path.dirname(config_path)):
@@ -334,11 +334,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     if len(parts) >= 2:
                         item_key = parts[0].upper()
                         try:
-                            delta = int(parts[1])
+                            delta = int(float(parts[1]))
                         except Exception:
                             continue
                         effect = parts[2].upper() if len(parts) >= 3 else None
-                        duration = int(parts[3]) if len(parts) >= 4 else None
+                        try:
+                            duration = int(float(parts[3])) if len(parts) >= 4 else None
+                        except Exception:
+                            duration = None
                         self.thirst_items_map[item_key] = {
                             "delta": delta,
                             "effect": effect,

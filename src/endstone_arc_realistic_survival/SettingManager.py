@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-MAIN_PATH = 'ARCRealisticSurvival'
+MAIN_PATH = 'plugins/ARCRealisticSurvival'
 
 class SettingManager:
     setting_dict = {}  # Class variable to store all settings
