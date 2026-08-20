@@ -46,6 +46,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_min = 0
         self.thirst_max = 100
         self.thirst_items_map = {}
+        self.thirst_consume_debug = False
         self.thirst_task = None
     
     def _safe_log(self, level: str, message: str):
@@ -67,6 +68,24 @@ class ARCRealisticSurvivalPlugin(Plugin):
             # 如果logger未初始化，使用print
             print(f"[{level.upper()}] {message}")
 
+    def _log_consume_always(self, message: str) -> None:
+        """进食/饮水诊断：同时写入插件 logger 与 stdout，避免后台级别过滤导致看不见。"""
+        self._safe_log('info', message)
+        try:
+            print(f"[ARCRealisticSurvival][consume] {message}", flush=True)
+        except Exception:
+            pass
+
+    def _resolve_survival_db_path(self) -> str:
+        """与 settings.yml 同目录优先：plugins/ARCRealisticSurvival/ars_survival.db；兼容旧路径 ARCRealisticSurvival/。"""
+        preferred = os.path.join("plugins", "ARCRealisticSurvival", "ars_survival.db")
+        legacy = os.path.join("ARCRealisticSurvival", "ars_survival.db")
+        if os.path.isfile(preferred):
+            return preferred
+        if os.path.isfile(legacy):
+            return legacy
+        return preferred
+
     def on_load(self) -> None:
         self._safe_log('info', "[ARCRealisticSurvival] on_load is called!")
         
@@ -80,8 +99,12 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._init_default_settings()
         
         # 初始化数据库管理器（仅生存相关）
-        db_path = os.path.join("plugins", "ARCRealisticSurvival", "ars_survival.db")
+        db_path = self._resolve_survival_db_path()
         self.db_manager = DatabaseManager(db_path)
+        self._safe_log(
+            'info',
+            f"[ARCRealisticSurvival] ars_survival.db -> {os.path.abspath(db_path)}",
+        )
         
         # 创建表（仅生存相关）
         self._create_survival_tables()
@@ -92,6 +115,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_enable(self) -> None:
         self._safe_log('info', "[ARCRealisticSurvival] on_enable is called!")
         self.register_events(self)
+        self._safe_log(
+            'info',
+            "[ARCRealisticSurvival] 事件已注册（含 PlayerItemConsumeEvent），进食/饮水时控制台会输出 [consume] 行",
+        )
 
         # 初始化经济插件 - 检查 arc_core 优先，然后 umoney
         self._init_economy_plugin()
@@ -281,6 +308,18 @@ class ARCRealisticSurvivalPlugin(Plugin):
         else:
             self._safe_log('error', "[ARCRealisticSurvival] Failed to create player_thirst table")
 
+        thirst_items_fields = {
+            "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+            "item_id": "TEXT NOT NULL UNIQUE",
+            "item_name": "TEXT",
+            "thirst_delta": "INTEGER NOT NULL DEFAULT 0",
+            "buffs": "TEXT",
+            "created_at": "TEXT",
+            "updated_at": "TEXT",
+        }
+        if self.db_manager.create_table("thirst_items", thirst_items_fields):
+            self._safe_log('info', "[ARCRealisticSurvival] thirst_items table ready")
+
     def _load_thirst_settings(self) -> None:
         try:
             val = self.setting_manager.GetSetting("thirst_tick_seconds")
@@ -288,14 +327,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.setting_manager.SetSetting("thirst_tick_seconds", "10")
                 self.thirst_tick_seconds = 10
             else:
-                self.thirst_tick_seconds = max(1, int(float(val)))
+                self.thirst_tick_seconds = max(1, int(val))
 
             val = self.setting_manager.GetSetting("thirst_decay_per_tick")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_decay_per_tick", "1")
                 self.thirst_decay_per_tick = 1
             else:
-                self.thirst_decay_per_tick = max(0, int(float(val)))
+                self.thirst_decay_per_tick = max(0, int(val))
 
             val = self.setting_manager.GetSetting("thirst_moving_multiplier")
             if val is None or val == "":
@@ -309,46 +348,111 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.setting_manager.SetSetting("thirst_initial", "100")
                 self.thirst_initial = 100
             else:
-                self.thirst_initial = int(float(val))
+                self.thirst_initial = int(val)
+
+            val = self.setting_manager.GetSetting("thirst_consume_debug")
+            if val is None or val == "":
+                self.setting_manager.SetSetting("thirst_consume_debug", "false")
+                self.thirst_consume_debug = False
+            else:
+                self.thirst_consume_debug = str(val).strip().lower() in ("1", "true", "yes", "on")
         except Exception as e:
             self._safe_log('error', f"[ARCRealisticSurvival] load thirst settings error: {e}")
 
-    def _load_thirst_items_config(self) -> None:
-        # 文件格式： 物品-口渴变动int-效果string-持续时间int，可缺省后两者
-        config_path = os.path.join("plugins", "ARCRealisticSurvival", "thirst_items.txt")
-        self.thirst_items_map = {}
+    def _register_thirst_item_cfg(self, item_id: str, cfg: dict) -> None:
+        """同一物品写入完整命名空间键与短 id（: 后一段），便于匹配 item.type 的多种格式。"""
+        raw = str(item_id).strip()
+        if not raw:
+            return
+        upper_full = raw.upper()
+        self.thirst_items_map[upper_full] = cfg
+        if ":" in upper_full:
+            short_key = upper_full.split(":", 1)[1]
+            self.thirst_items_map[short_key] = cfg
+
+    def _collect_item_identity_strings(self, item) -> list[str]:
+        """从 ItemStack 收集可能用于匹配的字符串（去重、保序）。"""
+        candidates = []
+        seen = set()
+
+        def add_one(val) -> None:
+            if val is None:
+                return
+            s = str(val).strip()
+            if not s or s in seen:
+                return
+            seen.add(s)
+            candidates.append(s)
+
+        add_one(getattr(item, "type", None))
+        add_one(getattr(item, "name", None))
         try:
-            if not os.path.exists(os.path.dirname(config_path)):
-                os.makedirs(os.path.dirname(config_path), exist_ok=True)
-            if not os.path.exists(config_path):
-                with open(config_path, "w", encoding="utf-8") as f:
-                    f.write("# 示例\n")
-                    f.write("COOKED_BEEF|-10\n")
-                    f.write("COLA|50|SPEED|30\n")
-            with open(config_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    parts = [p.strip() for p in line.replace('-', '|').split('|') if p.strip() != ""]
-                    if len(parts) >= 2:
-                        item_key = parts[0].upper()
-                        try:
-                            delta = int(float(parts[1]))
-                        except Exception:
-                            continue
-                        effect = parts[2].upper() if len(parts) >= 3 else None
-                        try:
-                            duration = int(float(parts[3])) if len(parts) >= 4 else None
-                        except Exception:
-                            duration = None
-                        self.thirst_items_map[item_key] = {
-                            "delta": delta,
-                            "effect": effect,
-                            "duration": duration
-                        }
+            t = getattr(item, "type", None)
+            if t is not None and hasattr(t, "name"):
+                add_one(getattr(t, "name", None))
+            if t is not None:
+                add_one(t)
+        except Exception:
+            pass
+        add_one(item)
+        return candidates
+
+    def _find_thirst_cfg_for_item(self, item):
+        for cand in self._collect_item_identity_strings(item):
+            upper_full = cand.upper()
+            if upper_full in self.thirst_items_map:
+                return self.thirst_items_map[upper_full], cand, upper_full
+            if ":" in upper_full:
+                short_key = upper_full.split(":", 1)[1]
+                if short_key in self.thirst_items_map:
+                    return self.thirst_items_map[short_key], cand, short_key
+        return None, None, None
+
+    def _load_thirst_items_config(self) -> None:
+        """仅从 SQLite 表 thirst_items 加载口渴物品（item_id、thirst_delta、buffs）。"""
+        self.thirst_items_map = {}
+        db_count = 0
+        try:
+            if not self.db_manager.table_exists("thirst_items"):
+                self._safe_log(
+                    'warning',
+                    "[ARCRealisticSurvival] thirst_items 表不存在，口渴物品配置为空（启动时应已自动建表）",
+                )
+                return
+            rows = self.db_manager.query_all(
+                "SELECT item_id, thirst_delta, buffs FROM thirst_items WHERE item_id IS NOT NULL AND item_id != ''"
+            )
+            for row in rows:
+                item_id = row.get("item_id")
+                if not item_id:
+                    continue
+                try:
+                    delta = int(row.get("thirst_delta", 0))
+                except Exception:
+                    continue
+                buffs_raw = row.get("buffs")
+                buffs_list = None
+                if buffs_raw:
+                    try:
+                        parsed = json.loads(buffs_raw)
+                        if isinstance(parsed, list):
+                            buffs_list = parsed
+                    except Exception:
+                        buffs_list = None
+                cfg = {
+                    "delta": delta,
+                    "buffs": buffs_list,
+                }
+                self._register_thirst_item_cfg(item_id, cfg)
+                db_count += 1
         except Exception as e:
-            self._safe_log('error', f"[ARCRealisticSurvival] load thirst items error: {e}")
+            self._safe_log('error', f"[ARCRealisticSurvival] load thirst_items from DB error: {e}")
+
+        self._safe_log(
+            'info',
+            f"[ARCRealisticSurvival] thirst items: database={db_count} rows, "
+            f"lookup keys={len(self.thirst_items_map)} (含命名空间/短名展开)",
+        )
 
     # 生存-口渴系统：内部工具
     def _clamp_thirst(self, value: int) -> int:
@@ -468,28 +572,59 @@ class ARCRealisticSurvivalPlugin(Plugin):
         try:
             player = event.player
             item = event.item
-            item_key = None
-            try:
-                item_key = getattr(item, 'type', None) or getattr(item, 'name', None)
-            except Exception:
-                item_key = None
-            if item_key is None:
+            if item is None:
+                self._log_consume_always(
+                    f"player={player.name} item=None，跳过（事件未携带物品栈）",
+                )
                 return
-            key = str(item_key).upper()
-            cfg = self.thirst_items_map.get(key)
+
+            identity_list = self._collect_item_identity_strings(item)
+            cfg, matched_src, lookup_key = self._find_thirst_cfg_for_item(item)
+            hand = getattr(event, "hand", None)
+
+            if self.thirst_consume_debug:
+                self._safe_log(
+                    'info',
+                    f"[ARS][consume][verbose] player={player.name} hand={hand!r} "
+                    f"identities={identity_list!r} matched_key={lookup_key!r} from={matched_src!r} "
+                    f"has_cfg={cfg is not None}",
+                )
+
             if cfg is None:
+                self._log_consume_always(
+                    f"player={player.name} hand={hand!r} identities={identity_list!r} "
+                    f"→ 未匹配 thirst_items（当前已载入 key 数={len(self.thirst_items_map)}）",
+                )
                 return
+
             delta = int(cfg.get("delta", 0))
+            self._log_consume_always(
+                f"player={player.name} hand={hand!r} identities={identity_list!r} "
+                f"→ 命中 key={lookup_key!r} thirst_delta={delta}",
+            )
             self._apply_thirst_delta(player, delta, reason="consume")
-            effect = cfg.get("effect")
-            duration = cfg.get("duration")
-            if effect and duration:
+
+            for buff in cfg.get("buffs") or []:
+                if not isinstance(buff, dict):
+                    continue
+                eff_name = buff.get("name")
+                if not eff_name:
+                    continue
                 try:
-                    cmd = f"effect give {player.name} {effect.lower()} {int(duration)} 1 true"
+                    duration_sec = int(buff.get("duration", 30))
+                except Exception:
+                    duration_sec = 30
+                try:
+                    amplifier = int(buff.get("amplifier", 0))
+                except Exception:
+                    amplifier = 0
+                try:
+                    cmd = f"effect give {player.name} {str(eff_name).lower()} {duration_sec} {amplifier} true"
                     if hasattr(self.server, 'dispatch_command'):
                         self.server.dispatch_command(cmd)
                 except Exception:
                     pass
+
             self._persist_player_thirst(player)
         except Exception as e:
             self._safe_log('error', f"[ARS] consume event error: {e}")
