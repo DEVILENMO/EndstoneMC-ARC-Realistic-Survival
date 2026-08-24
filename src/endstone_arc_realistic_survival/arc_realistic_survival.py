@@ -4,6 +4,7 @@ import json
 import math
 
 from endstone import GameMode
+from endstone.attribute import Attribute, AttributeModifier
 from endstone.command import Command, CommandSender
 from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent
 from endstone.plugin import Plugin
@@ -51,6 +52,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
+        self.thirst_hydrated_threshold = 70
+        self.thirst_dehydrated_threshold = 30
+        self.thirst_speed_boost = 0.2
+        self.thirst_speed_penalty = 0.2
+        self.THIRST_SPEED_MODIFIER = "ars:thirst_speed"
         self.nutrition_manager = None
         self.zombie_virus_manager = None
     
@@ -598,8 +604,62 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.thirst_consume_debug = False
             else:
                 self.thirst_consume_debug = str(val).strip().lower() in ("1", "true", "yes", "on")
+
+            for key, default in (
+                ("thirst_hydrated_threshold", "70"),
+                ("thirst_dehydrated_threshold", "30"),
+            ):
+                val = self.setting_manager.GetSetting(key)
+                if val is None or val == "":
+                    self.setting_manager.SetSetting(key, default)
+                    val = default
+                setattr(self, key, int(val))
+
+            for key, default in (
+                ("thirst_speed_boost", "0.2"),
+                ("thirst_speed_penalty", "0.2"),
+            ):
+                val = self.setting_manager.GetSetting(key)
+                if val is None or val == "":
+                    self.setting_manager.SetSetting(key, default)
+                    val = default
+                setattr(self, key, float(val))
         except Exception as e:
             self._safe_log('error', f"[ARCRealisticSurvival] load thirst settings error: {e}")
+
+    def _apply_thirst_movement_modifier(self, player) -> None:
+        try:
+            xuid = self._get_player_xuid(player)
+            thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
+            inst = player.get_attribute(Attribute.MOVEMENT_SPEED)
+            if inst is None:
+                return
+            try:
+                inst.remove_modifier(self.THIRST_SPEED_MODIFIER)
+            except Exception:
+                pass
+            if thirst >= self.thirst_hydrated_threshold:
+                inst.add_transient_modifier(AttributeModifier(
+                    self.THIRST_SPEED_MODIFIER,
+                    self.thirst_speed_boost,
+                    AttributeModifier.MULTIPLY_BASE,
+                ))
+            elif thirst <= self.thirst_dehydrated_threshold:
+                inst.add_transient_modifier(AttributeModifier(
+                    self.THIRST_SPEED_MODIFIER,
+                    -self.thirst_speed_penalty,
+                    AttributeModifier.MULTIPLY_BASE,
+                ))
+        except Exception as e:
+            self._safe_log('error', f"[ARS] thirst movement modifier error: {e}")
+
+    def _clear_thirst_movement_modifier(self, player) -> None:
+        try:
+            inst = player.get_attribute(Attribute.MOVEMENT_SPEED)
+            if inst is not None:
+                inst.remove_modifier(self.THIRST_SPEED_MODIFIER)
+        except Exception:
+            pass
 
     def _register_thirst_item_cfg(self, item_id: str, cfg: dict) -> None:
         """同一物品写入完整命名空间键与短 id（: 后一段），便于匹配 item.type 的多种格式。"""
@@ -750,12 +810,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
         if new_val != current:
             msg = self.language_manager.GetText("THIRST_VALUE") or "当前口渴值: {value}"
             player.send_popup(msg.replace("{value}", str(new_val)))
+            self._apply_thirst_movement_modifier(player)
         return new_val
 
     def _reset_player_thirst(self, player) -> None:
         xuid = self._get_player_xuid(player)
         self.player_xuid_to_thirst[xuid] = self.thirst_initial
         self._persist_player_thirst(player)
+        self._apply_thirst_movement_modifier(player)
 
     def _start_thirst_timer(self) -> None:
         try:
@@ -800,6 +862,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_player_join(self, event: PlayerJoinEvent):
         player = event.player
         self._load_player_thirst(player)
+        self._apply_thirst_movement_modifier(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_join(player)
         if self.zombie_virus_manager is not None:
@@ -809,6 +872,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_player_quit(self, event: PlayerQuitEvent):
         player = event.player
         self._persist_player_thirst(player)
+        self._clear_thirst_movement_modifier(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_quit(player)
         if self.zombie_virus_manager is not None:
@@ -829,6 +893,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
     @event_handler()
     def on_player_respawn(self, event: PlayerRespawnEvent):
         player = event.player
+        self._apply_thirst_movement_modifier(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_respawn(player)
 

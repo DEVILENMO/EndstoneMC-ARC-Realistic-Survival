@@ -10,6 +10,7 @@
 - **动态口渴值**：玩家拥有 0-100 的口渴值，需要定期补充水分
 - **自动衰减**：口渴值会随时间自动降低
 - **移动加速消耗**：玩家移动时口渴值消耗速度会增加
+- **移速联动**：口渴 ≥70 时移动速度 +20%，≤30 时 -20%（插件内 `AttributeModifier`）
 - **数据持久化**：玩家口渴值会自动保存到数据库
 - **实时提示**：通过弹窗显示当前口渴值
 
@@ -78,6 +79,10 @@ thirst_tick_seconds: 10          # 口渴值衰减间隔（秒）
 thirst_decay_per_tick: 1         # 每次衰减的口渴值
 thirst_moving_multiplier: 2.0    # 移动时的衰减倍率
 thirst_initial: 100              # 玩家初始口渴值
+thirst_hydrated_threshold: 70    # 高于等于此值：移速 +20%
+thirst_dehydrated_threshold: 30  # 低于等于此值：移速 -20%
+thirst_speed_boost: 0.2          # 不口渴加速倍率（MULTIPLY_BASE）
+thirst_speed_penalty: 0.2        # 口渴减速倍率
 nutrition_tick_seconds: 300      # 营养衰减间隔（秒）
 nutrition_decay_per_tick: 1      # 每次衰减的营养值
 nutrition_initial: 100           # 玩家初始营养值
@@ -112,7 +117,7 @@ infection_zombie_entities: zombie:zombie,zombie:zombie_runner,...  # 逗号分�
 
 症状阈值：健康 ≥60，轻症 30-59，中症 10-29，重症 <10。
 
-食物营养配置存储在 SQLite 表 `nutrition_items`（首次启动自动播种 30 种原版食物）。
+食物营养与口渴配置存储在 SQLite 表 `nutrition_items` / `thirst_items`。丧尸服可用 `scripts/seed_zombie_server_food.py` 批量写入 sgs_farm 模组与原版食物。
 
 ### 物品效果配置 (thirst_items)
 
@@ -233,6 +238,11 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.3
+- 口渴移速联动：≥70 加速 20%，≤30 减速 20%（Endstone `Attribute.MOVEMENT_SPEED`）
+- 新增丧尸服食物播种脚本 `scripts/seed_zombie_server_food.py`（sgs_farm 全量 + 原版食物口渴/营养）
+- 修复退出时未清理营养修饰符的问题
 
 ### v0.3.2
 - 死亡重置口渴值与感染值；营养值不重置，重生后恢复缺素症状
