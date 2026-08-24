@@ -86,7 +86,8 @@ infection_tick_seconds: 12        # 感染 tick 间隔（秒）
 infection_threshold: 50           # 恶化临界值
 infection_growth_per_minute: 5    # 超临界每分钟增长
 infection_decay_per_minute: 2     # 低于临界每分钟下降
-infection_zombie_entity: minecraft:zombie  # 丧尸化时生成的实体
+infection_zombie_entity: minecraft:zombie  # 丧尸化时生成的实体（单值兼容）
+infection_zombie_entities: zombie:zombie,zombie:zombie_runner,...  # 逗号分隔，满值随机生成其一
 ```
 
 ### 感染源配置 (infection_sources)
@@ -229,6 +230,10 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.1
+- 丧尸化支持 `infection_zombie_entities` 多实体随机生成
+- 新增丧尸服感染源播种脚本 `scripts/seed_zombie_server_infection.py`
 
 ### v0.3.0
 - 新增丧尸病毒感染系统（可配置感染源、临界恶化、满值丧尸化）

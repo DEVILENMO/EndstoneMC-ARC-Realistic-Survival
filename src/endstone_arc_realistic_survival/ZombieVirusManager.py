@@ -1,4 +1,5 @@
 import datetime
+import random
 import time
 from typing import Any, Callable, Optional
 
@@ -48,6 +49,7 @@ class ZombieVirusManager:
         self.infection_max = 100.0
         self.infection_warn_cooldown_seconds = 120
         self.infection_zombie_entity = "minecraft:zombie"
+        self.infection_zombie_entities: list[str] = ["minecraft:zombie"]
         self._transforming: set[str] = set()
 
     def load_settings(self) -> None:
@@ -83,6 +85,12 @@ class ZombieVirusManager:
         self.infection_max = _get_float("infection_max", "100", 1)
         self.infection_warn_cooldown_seconds = int(_get_float("infection_warn_cooldown_seconds", "120", 30))
         self.infection_zombie_entity = _get_str("infection_zombie_entity", "minecraft:zombie")
+        entities_raw = self.setting_manager.GetSetting("infection_zombie_entities")
+        if entities_raw is None or str(entities_raw).strip() == "":
+            entities_raw = self.infection_zombie_entity
+        self.infection_zombie_entities = [
+            x.strip() for x in str(entities_raw).split(",") if x.strip()
+        ] or [self.infection_zombie_entity]
 
     def ensure_tables(self) -> None:
         player_fields = {
@@ -303,7 +311,7 @@ class ZombieVirusManager:
         try:
             loc = player.location
             dimension = getattr(loc, "dimension", None)
-            spawn_type = self.infection_zombie_entity or "minecraft:zombie"
+            spawn_type = random.choice(self.infection_zombie_entities)
 
             self.player_infection[xuid] = 0.0
             self.persist_player(player)
