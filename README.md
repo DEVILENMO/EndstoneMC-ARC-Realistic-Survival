@@ -2,7 +2,7 @@
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
 
-一个为 Endstone 服务器打造的真实生存插件，添加口渴值系统、物品效果等功能，让生存体验更加真实有趣。
+一个为 Endstone 服务器打造的真实生存插件，添加口渴值系统、营养学系统、物品效果等功能，让生存体验更加真实有趣。
 
 ## ✨ 功能特性
 
@@ -12,6 +12,13 @@
 - **移动加速消耗**：玩家移动时口渴值消耗速度会增加
 - **数据持久化**：玩家口渴值会自动保存到数据库
 - **实时提示**：通过弹窗显示当前口渴值
+
+### 🍎 营养学系统
+- **四种营养素**：维生素 A、维生素 C、铁、蛋白质，各自独立 0-100 数值
+- **缺素病症**：长期偏食触发夜盲症、坏血病、贫血、肌无力
+- **症状分级**：健康 / 轻症 / 中症 / 重症，仅在等级变化时 Toast 提示
+- **食物绑定**：每种食物可配置四种营养素加成（SQLite `nutrition_items` 表）
+- **原生 API**：通过 Endstone `Effect` 与 `AttributeModifier` 实现减益，不污染实体 NBT
 
 ### 🍺 物品效果系统
 - **自定义物品效果**：通过配置文件自定义任意物品的效果
@@ -65,9 +72,26 @@ thirst_tick_seconds: 10          # 口渴值衰减间隔（秒）
 thirst_decay_per_tick: 1         # 每次衰减的口渴值
 thirst_moving_multiplier: 2.0    # 移动时的衰减倍率
 thirst_initial: 100              # 玩家初始口渴值
+nutrition_tick_seconds: 300      # 营养衰减间隔（秒）
+nutrition_decay_per_tick: 1      # 每次衰减的营养值
+nutrition_initial: 100           # 玩家初始营养值
+nutrition_warn_cooldown_seconds: 300  # 症状提示冷却（秒）
 ```
 
-### 物品效果配置 (thirst_items.txt)
+### 营养与缺素病
+
+| 营养素 | 缺素病 | 主要症状 |
+|--------|--------|----------|
+| 维生素 A | 夜盲症 | 夜间随机短时黑暗 |
+| 维生素 C | 坏血病 | 周期性掉血 + 虚弱 |
+| 铁 | 贫血 | 最大生命下降 + 更易饥饿 |
+| 蛋白质 | 肌无力 | 攻击下降 + 挖掘变慢 |
+
+症状阈值：健康 ≥60，轻症 30-59，中症 10-29，重症 <10。
+
+食物营养配置存储在 SQLite 表 `nutrition_items`（首次启动自动播种 30 种原版食物）。
+
+### 物品效果配置 (thirst_items)
 
 在 `ARCRealisticSurvival/thirst_items.txt` 中配置物品效果：
 
@@ -96,6 +120,8 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 |------|------|------|
 | `/ars` | `arc_realistic_survival.command.config` | 打开配置面板 |
 | `/ars reload` | `arc_realistic_survival.command.config` | 重载配置 |
+| `/ars nutrition` | 无 | 打开营养学面板（查看四条营养值与食物表） |
+| `/ars nutriset <玩家> <营养素> <0-100>` | OP | 调试：设置玩家指定营养素 |
 
 ### 权限节点
 
@@ -113,7 +139,12 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 
 3. **物品效果**：
    - 消耗特定物品可获得临时增益效果
-   - 支持所有原版药水效果
+   - 支持所有原版药水效果（通过 Endstone 原生 `Effect` API）
+
+4. **营养学**：
+   - 默认每 5 分钟四种营养素各 -1
+   - 进食匹配 `nutrition_items` 的食物可补充对应营养
+   - 使用 `/ars nutrition` 查看当前状态与食物营养表
 
 ## 🗄️ 数据存储
 
@@ -122,6 +153,8 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 - **数据库位置**：`ARCRealisticSurvival/ars_survival.db`
 - **存储内容**：
   - 玩家口渴值
+  - 玩家四种营养素数值
+  - 口渴/营养物品配置表
   - 最后更新时间
   - 玩家名称
 
@@ -148,6 +181,7 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 src/endstone_arc_realistic_survival/
 ├── __init__.py              # 插件入口
 ├── arc_realistic_survival.py # 主插件逻辑
+├── NutritionManager.py      # 营养学系统
 ├── DatabaseManager.py       # 数据库管理器
 ├── LanguageManager.py       # 语言管理器
 └── SettingManager.py        # 设置管理器
@@ -164,6 +198,13 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.2.0
+- 新增营养学系统（维生素 A/C、铁、蛋白质）
+- 四种缺素病：夜盲症、坏血病、贫血、肌无力
+- `/ars nutrition` 营养面板与 `/ars nutriset` 调试命令
+- 修复 thirst_items 药水效果未生效的问题（改用原生 Effect API）
+- 首次启动自动播种 30 种原版食物营养配置
 
 ### v0.1.0
 - 初始版本发布

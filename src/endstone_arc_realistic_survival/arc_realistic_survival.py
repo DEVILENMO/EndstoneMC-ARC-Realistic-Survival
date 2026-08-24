@@ -7,10 +7,12 @@ from endstone import GameMode
 from endstone.command import Command, CommandSender
 from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent
 from endstone.plugin import Plugin
-from endstone.form import ModalForm, Label, TextInput
+from endstone.form import ActionForm, Button, ModalForm, Label, TextInput
+from endstone.potion import Effect, EffectType
 
 from .DatabaseManager import DatabaseManager
 from .LanguageManager import LanguageManager
+from .NutritionManager import NUTRIENT_KEYS, NutritionManager
 from .SettingManager import SettingManager
 
 
@@ -48,6 +50,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
+        self.nutrition_manager = None
     
     def _safe_log(self, level: str, message: str):
         """
@@ -108,6 +111,18 @@ class ARCRealisticSurvivalPlugin(Plugin):
         
         # 创建表（仅生存相关）
         self._create_survival_tables()
+        # 初始化营养学管理器
+        self.nutrition_manager = NutritionManager(
+            self,
+            self.db_manager,
+            self.setting_manager,
+            self._safe_log,
+            self._get_player_xuid,
+            self._collect_item_identity_strings,
+        )
+        self.nutrition_manager.ensure_tables()
+        self.nutrition_manager.load_settings()
+        self.nutrition_manager.load_items_config()
         # 加载生存-口渴系统配置
         self._load_thirst_settings()
         self._load_thirst_items_config()
@@ -124,6 +139,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._init_economy_plugin()
         # 启动口渴值定时任务
         self._start_thirst_timer()
+        # 启动营养学定时任务
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.start_timer()
 
     def on_disable(self) -> None:
         self._safe_log('info', "[ARCRealisticSurvival] on_disable is called!")
@@ -138,10 +156,16 @@ class ARCRealisticSurvivalPlugin(Plugin):
             except Exception:
                 pass
             self.thirst_task = None
-        # 保存所有玩家口渴值
+        # 停止营养定时任务并保存
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.stop_timer()
+        # 保存所有玩家口渴值与营养值
         try:
             for player in self.server.online_players:
                 self._persist_player_thirst(player)
+                if self.nutrition_manager is not None:
+                    self.nutrition_manager.clear_symptoms(player)
+                    self.nutrition_manager.persist_player(player)
         except Exception:
             pass
     
@@ -189,14 +213,52 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
         match command.name:
             case "ars":
-                # /ars reload 支持热重载
-                if args and len(args) >= 1 and str(args[0]).lower() == "reload":
-                    if hasattr(sender, 'is_op') and not sender.is_op:
-                        sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                if args and len(args) >= 1:
+                    sub = str(args[0]).lower()
+                    if sub == "reload":
+                        if hasattr(sender, 'is_op') and not sender.is_op:
+                            sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                            return True
+                        self._reload_survival_settings()
+                        sender.send_message("[ARS] 配置与物品效果已重载")
                         return True
-                    self._reload_survival_settings()
-                    sender.send_message("[ARS] 配置与物品效果已重载")
-                    return True
+                    if sub == "nutrition":
+                        if not hasattr(sender, 'send_form'):
+                            sender.send_message(self.language_manager.GetText("PLAYER_ONLY_COMMAND") or "Players only")
+                            return True
+                        self._show_nutrition_panel(sender)
+                        return True
+                    if sub == "nutriset":
+                        if not getattr(sender, 'is_op', False):
+                            sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                            return True
+                        if len(args) < 4:
+                            sender.send_message("[ARS] 用法: /ars nutriset <玩家> <vitamin_a|vitamin_c|iron|protein> <0-100>")
+                            return True
+                        target = self.server.get_player(args[1])
+                        if target is None:
+                            sender.send_message(f"[ARS] 找不到玩家: {args[1]}")
+                            return True
+                        nutrient = args[2].lower()
+                        if nutrient not in NUTRIENT_KEYS:
+                            sender.send_message("[ARS] 营养素必须是: vitamin_a, vitamin_c, iron, protein")
+                            return True
+                        try:
+                            value = int(args[3])
+                        except ValueError:
+                            sender.send_message("[ARS] 数值必须是 0-100 的整数")
+                            return True
+                        if self.nutrition_manager is None:
+                            sender.send_message("[ARS] 营养系统未初始化")
+                            return True
+                        try:
+                            data = self.nutrition_manager.set_nutrient(target, nutrient, value)
+                            sender.send_message(
+                                f"[ARS] 已设置 {target.name} 的 {nutrient}={data[nutrient]}"
+                            )
+                        except Exception as e:
+                            sender.send_message(f"[ARS] 设置失败: {e}")
+                        return True
                 # 打开配置面板（仅玩家、且需要权限/OP）
                 if not hasattr(sender, 'send_form'):
                     sender.send_message(self.language_manager.GetText("PLAYER_ONLY_COMMAND") or "Players only")
@@ -209,11 +271,13 @@ class ARCRealisticSurvivalPlugin(Plugin):
         return True
 
     def _reload_survival_settings(self) -> None:
-        # 重新加载配置与物品效果，并重启口渴定时器
+        # 重新加载配置与物品效果，并重启定时器
         try:
             self._load_thirst_settings()
             self._load_thirst_items_config()
-            # 重启定时任务应用新的节奏
+            if self.nutrition_manager is not None:
+                self.nutrition_manager.load_settings()
+                self.nutrition_manager.load_items_config()
             if self.thirst_task is not None:
                 try:
                     self.thirst_task.cancel()
@@ -221,20 +285,24 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     pass
                 self.thirst_task = None
             self._start_thirst_timer()
+            if self.nutrition_manager is not None:
+                self.nutrition_manager.start_timer()
         except Exception as e:
             self._safe_log('error', f"[ARS] reload settings error: {e}")
 
     def _show_survival_config_panel(self, player) -> None:
         try:
+            nm = self.nutrition_manager
             title = "ARC Realistic Survival 配置"
             content_lines = [
                 "修改后提交即写入配置并热重载",
-                "单位: tick秒/倍数/整数",
+                "口渴: tick秒/倍数/整数",
+                "营养: 衰减秒数/每次衰减/初始值/提示冷却",
             ]
             header = Label(text="\n".join(content_lines))
             input_tick = TextInput(
                 label="thirst_tick_seconds",
-                placeholder="每次衰减的秒数",
+                placeholder="口渴衰减间隔（秒）",
                 default_value=str(self.thirst_tick_seconds)
             )
             input_decay = TextInput(
@@ -252,32 +320,65 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 placeholder="初始口渴值(0-100)",
                 default_value=str(self.thirst_initial)
             )
+            input_nutrition_tick = TextInput(
+                label="nutrition_tick_seconds",
+                placeholder="营养衰减间隔（秒，默认300）",
+                default_value=str(nm.nutrition_tick_seconds if nm else 300)
+            )
+            input_nutrition_decay = TextInput(
+                label="nutrition_decay_per_tick",
+                placeholder="每次衰减营养值(>=0)",
+                default_value=str(nm.nutrition_decay_per_tick if nm else 1)
+            )
+            input_nutrition_initial = TextInput(
+                label="nutrition_initial",
+                placeholder="初始营养值(0-100)",
+                default_value=str(nm.nutrition_initial if nm else 100)
+            )
+            input_nutrition_cooldown = TextInput(
+                label="nutrition_warn_cooldown_seconds",
+                placeholder="症状提示冷却（秒）",
+                default_value=str(nm.nutrition_warn_cooldown_seconds if nm else 300)
+            )
 
             def on_submit(sender, json_str: str):
                 try:
                     data = json.loads(json_str)
-                    # data[1..4] 依次是四个输入框的值
                     new_tick = int(float(data[1]))
                     new_decay = int(float(data[2]))
                     new_move = float(data[3])
                     new_initial = int(float(data[4]))
+                    new_n_tick = int(float(data[5]))
+                    new_n_decay = int(float(data[6]))
+                    new_n_initial = int(float(data[7]))
+                    new_n_cooldown = int(float(data[8]))
 
                     if new_tick < 1:
-                        raise ValueError("tick seconds < 1")
+                        raise ValueError("thirst tick seconds < 1")
                     if new_decay < 0:
-                        raise ValueError("decay < 0")
+                        raise ValueError("thirst decay < 0")
                     if new_move < 1.0:
                         raise ValueError("moving multiplier < 1.0")
                     if new_initial < 0 or new_initial > 100:
-                        raise ValueError("initial out of [0,100]")
+                        raise ValueError("thirst initial out of [0,100]")
+                    if new_n_tick < 30:
+                        raise ValueError("nutrition tick seconds < 30")
+                    if new_n_decay < 0:
+                        raise ValueError("nutrition decay < 0")
+                    if new_n_initial < 0 or new_n_initial > 100:
+                        raise ValueError("nutrition initial out of [0,100]")
+                    if new_n_cooldown < 30:
+                        raise ValueError("nutrition cooldown < 30")
 
-                    # 写回配置文件
                     self.setting_manager.SetSetting("thirst_tick_seconds", str(new_tick))
                     self.setting_manager.SetSetting("thirst_decay_per_tick", str(new_decay))
                     self.setting_manager.SetSetting("thirst_moving_multiplier", str(new_move))
                     self.setting_manager.SetSetting("thirst_initial", str(new_initial))
+                    self.setting_manager.SetSetting("nutrition_tick_seconds", str(new_n_tick))
+                    self.setting_manager.SetSetting("nutrition_decay_per_tick", str(new_n_decay))
+                    self.setting_manager.SetSetting("nutrition_initial", str(new_n_initial))
+                    self.setting_manager.SetSetting("nutrition_warn_cooldown_seconds", str(new_n_cooldown))
 
-                    # 同步到内存并热重载
                     self._reload_survival_settings()
                     sender.send_message("[ARS] 配置已保存并重载")
                 except Exception as e:
@@ -285,13 +386,40 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
             panel = ModalForm(
                 title=title,
-                controls=[header, input_tick, input_decay, input_move, input_initial],
+                controls=[
+                    header, input_tick, input_decay, input_move, input_initial,
+                    input_nutrition_tick, input_nutrition_decay, input_nutrition_initial, input_nutrition_cooldown,
+                ],
                 on_close=lambda s: None,
                 on_submit=on_submit
             )
             player.send_form(panel)
         except Exception as e:
             self._safe_log('error', f"[ARS] show config panel error: {e}")
+
+    def _show_nutrition_panel(self, player) -> None:
+        try:
+            if self.nutrition_manager is None:
+                player.send_message("[ARS] 营养系统未初始化")
+                return
+            status_lines = self.nutrition_manager.get_status_lines(player)
+            catalog_lines = self.nutrition_manager.get_food_catalog_lines(limit=15)
+            body = "\n".join(status_lines + [""] + catalog_lines)
+            form = ActionForm(
+                title="营养学",
+                content=body,
+                buttons=[Button("刷新"), Button("关闭")],
+                on_submit=lambda s, idx: self._on_nutrition_panel_submit(s, idx),
+                on_close=lambda s: None,
+            )
+            player.send_form(form)
+        except Exception as e:
+            self._safe_log('error', f"[ARS] show nutrition panel error: {e}")
+            player.send_message(f"[ARS] 无法打开营养面板: {e}")
+
+    def _on_nutrition_panel_submit(self, player, index: int) -> None:
+        if index == 0:
+            self._show_nutrition_panel(player)
     
     # 数据库（仅生存）
 
@@ -553,11 +681,15 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_player_join(self, event: PlayerJoinEvent):
         player = event.player
         self._load_player_thirst(player)
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.on_player_join(player)
 
     @event_handler()
     def on_player_quit(self, event: PlayerQuitEvent):
         player = event.player
         self._persist_player_thirst(player)
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.on_player_quit(player)
 
     @event_handler()
     def on_player_move(self, event: PlayerMoveEvent):
@@ -590,41 +722,51 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     f"has_cfg={cfg is not None}",
                 )
 
-            if cfg is None:
+            thirst_handled = False
+            if cfg is not None:
+                delta = int(cfg.get("delta", 0))
                 self._log_consume_always(
                     f"player={player.name} hand={hand!r} identities={identity_list!r} "
-                    f"→ 未匹配 thirst_items（当前已载入 key 数={len(self.thirst_items_map)}）",
+                    f"→ 命中 key={lookup_key!r} thirst_delta={delta}",
+                )
+                self._apply_thirst_delta(player, delta, reason="consume")
+                self._apply_item_buffs(player, cfg.get("buffs") or [])
+                thirst_handled = True
+
+            nutrition_handled = False
+            if self.nutrition_manager is not None:
+                nutrition_handled = self.nutrition_manager.on_player_consume(player, item)
+
+            if not thirst_handled and not nutrition_handled:
+                self._log_consume_always(
+                    f"player={player.name} hand={hand!r} identities={identity_list!r} "
+                    f"→ 未匹配 thirst_items / nutrition_items",
                 )
                 return
-
-            delta = int(cfg.get("delta", 0))
-            self._log_consume_always(
-                f"player={player.name} hand={hand!r} identities={identity_list!r} "
-                f"→ 命中 key={lookup_key!r} thirst_delta={delta}",
-            )
-            self._apply_thirst_delta(player, delta, reason="consume")
-
-            for buff in cfg.get("buffs") or []:
-                if not isinstance(buff, dict):
-                    continue
-                eff_name = buff.get("name")
-                if not eff_name:
-                    continue
-                try:
-                    duration_sec = int(buff.get("duration", 30))
-                except Exception:
-                    duration_sec = 30
-                try:
-                    amplifier = int(buff.get("amplifier", 0))
-                except Exception:
-                    amplifier = 0
-                try:
-                    cmd = f"effect give {player.name} {str(eff_name).lower()} {duration_sec} {amplifier} true"
-                    if hasattr(self.server, 'dispatch_command'):
-                        self.server.dispatch_command(cmd)
-                except Exception:
-                    pass
 
             self._persist_player_thirst(player)
         except Exception as e:
             self._safe_log('error', f"[ARS] consume event error: {e}")
+
+    def _apply_item_buffs(self, player, buffs: list) -> None:
+        for buff in buffs:
+            if not isinstance(buff, dict):
+                continue
+            eff_name = buff.get("name")
+            if not eff_name:
+                continue
+            try:
+                duration_sec = int(buff.get("duration", 30))
+            except Exception:
+                duration_sec = 30
+            try:
+                amplifier = int(buff.get("amplifier", 0))
+            except Exception:
+                amplifier = 0
+            try:
+                effect_type = EffectType.get(str(eff_name).lower())
+                if effect_type is None:
+                    continue
+                player.add_effect(Effect(effect_type, duration_sec * 20, amplifier, ambient=True))
+            except Exception as e:
+                self._safe_log('error', f"[ARS] apply item buff error: {e}")
