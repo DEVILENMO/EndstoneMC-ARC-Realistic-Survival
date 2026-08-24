@@ -521,6 +521,14 @@ class NutritionManager:
         self.player_nutrition.pop(xuid, None)
         self.player_severity.pop(xuid, None)
 
+    def on_player_respawn(self, player) -> None:
+        """重生后按数据库中的营养值重新挂症状（死亡不清营养）。"""
+        xuid = self._get_xuid(player)
+        if xuid not in self.player_nutrition:
+            self.load_player(player)
+        else:
+            self._apply_persistent_symptoms(player)
+
     def on_player_consume(self, player, item) -> bool:
         cfg, _, lookup_key = self.find_cfg_for_item(item)
         if cfg is None:

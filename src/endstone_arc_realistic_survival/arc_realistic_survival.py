@@ -5,7 +5,7 @@ import math
 
 from endstone import GameMode
 from endstone.command import Command, CommandSender
-from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent
+from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent
 from endstone.plugin import Plugin
 from endstone.form import ActionForm, Button, ModalForm, Label, TextInput
 from endstone.potion import Effect, EffectType
@@ -752,6 +752,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
             player.send_popup(msg.replace("{value}", str(new_val)))
         return new_val
 
+    def _reset_player_thirst(self, player) -> None:
+        xuid = self._get_player_xuid(player)
+        self.player_xuid_to_thirst[xuid] = self.thirst_initial
+        self._persist_player_thirst(player)
+
     def _start_thirst_timer(self) -> None:
         try:
             if self.thirst_task is not None:
@@ -813,6 +818,19 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_actor_damage(self, event: ActorDamageEvent):
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.on_actor_damage(event)
+
+    @event_handler()
+    def on_player_death(self, event: PlayerDeathEvent):
+        player = event.player
+        self._reset_player_thirst(player)
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.reset_on_death(player)
+
+    @event_handler()
+    def on_player_respawn(self, event: PlayerRespawnEvent):
+        player = event.player
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.on_player_respawn(player)
 
     @event_handler()
     def on_player_move(self, event: PlayerMoveEvent):

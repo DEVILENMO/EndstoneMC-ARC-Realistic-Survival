@@ -345,6 +345,13 @@ class ZombieVirusManager:
             self._log("error", f"[ARS] zombie transform error: {e}")
             self._transforming.discard(xuid)
 
+    def reset_on_death(self, player) -> None:
+        """死亡时清零感染（口渴由主插件重置，营养不重置）。"""
+        xuid = self._get_xuid(player)
+        self._transforming.discard(xuid)
+        self.player_infection[xuid] = 0.0
+        self.persist_player(player)
+
     def on_player_join(self, player) -> None:
         self.load_player(player)
 
