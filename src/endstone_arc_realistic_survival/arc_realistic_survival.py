@@ -5,7 +5,7 @@ import math
 
 from endstone import GameMode
 from endstone.command import Command, CommandSender
-from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent
+from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent
 from endstone.plugin import Plugin
 from endstone.form import ActionForm, Button, ModalForm, Label, TextInput
 from endstone.potion import Effect, EffectType
@@ -14,6 +14,7 @@ from .DatabaseManager import DatabaseManager
 from .LanguageManager import LanguageManager
 from .NutritionManager import NUTRIENT_KEYS, NutritionManager
 from .SettingManager import SettingManager
+from .ZombieVirusManager import ZombieVirusManager
 
 
 class ARCRealisticSurvivalPlugin(Plugin):
@@ -51,6 +52,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_consume_debug = False
         self.thirst_task = None
         self.nutrition_manager = None
+        self.zombie_virus_manager = None
     
     def _safe_log(self, level: str, message: str):
         """
@@ -123,6 +125,17 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.nutrition_manager.ensure_tables()
         self.nutrition_manager.load_settings()
         self.nutrition_manager.load_items_config()
+        # 初始化丧尸病毒管理器
+        self.zombie_virus_manager = ZombieVirusManager(
+            self,
+            self.db_manager,
+            self.setting_manager,
+            self._safe_log,
+            self._get_player_xuid,
+        )
+        self.zombie_virus_manager.ensure_tables()
+        self.zombie_virus_manager.load_settings()
+        self.zombie_virus_manager.load_sources_config()
         # 加载生存-口渴系统配置
         self._load_thirst_settings()
         self._load_thirst_items_config()
@@ -142,6 +155,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         # 启动营养学定时任务
         if self.nutrition_manager is not None:
             self.nutrition_manager.start_timer()
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.start_timer()
 
     def on_disable(self) -> None:
         self._safe_log('info', "[ARCRealisticSurvival] on_disable is called!")
@@ -159,13 +174,17 @@ class ARCRealisticSurvivalPlugin(Plugin):
         # 停止营养定时任务并保存
         if self.nutrition_manager is not None:
             self.nutrition_manager.stop_timer()
-        # 保存所有玩家口渴值与营养值
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.stop_timer()
+        # 保存所有玩家口渴值、营养值与感染值
         try:
             for player in self.server.online_players:
                 self._persist_player_thirst(player)
                 if self.nutrition_manager is not None:
                     self.nutrition_manager.clear_symptoms(player)
                     self.nutrition_manager.persist_player(player)
+                if self.zombie_virus_manager is not None:
+                    self.zombie_virus_manager.persist_player(player)
         except Exception:
             pass
     
@@ -228,6 +247,37 @@ class ARCRealisticSurvivalPlugin(Plugin):
                             return True
                         self._show_nutrition_panel(sender)
                         return True
+                    if sub == "infection":
+                        if not hasattr(sender, 'send_form'):
+                            sender.send_message(self.language_manager.GetText("PLAYER_ONLY_COMMAND") or "Players only")
+                            return True
+                        self._show_infection_panel(sender)
+                        return True
+                    if sub == "infectset":
+                        if not getattr(sender, 'is_op', False):
+                            sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                            return True
+                        if len(args) < 3:
+                            sender.send_message("[ARS] 用法: /ars infectset <玩家> <0-100>")
+                            return True
+                        target = self.server.get_player(args[1])
+                        if target is None:
+                            sender.send_message(f"[ARS] 找不到玩家: {args[1]}")
+                            return True
+                        try:
+                            value = float(args[2])
+                        except ValueError:
+                            sender.send_message("[ARS] 数值必须是 0-100")
+                            return True
+                        if self.zombie_virus_manager is None:
+                            sender.send_message("[ARS] 感染系统未初始化")
+                            return True
+                        try:
+                            val = self.zombie_virus_manager.set_infection(target, value)
+                            sender.send_message(f"[ARS] 已设置 {target.name} 感染值={int(val)}")
+                        except Exception as e:
+                            sender.send_message(f"[ARS] 设置失败: {e}")
+                        return True
                     if sub == "nutriset":
                         if not getattr(sender, 'is_op', False):
                             sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
@@ -278,6 +328,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
             if self.nutrition_manager is not None:
                 self.nutrition_manager.load_settings()
                 self.nutrition_manager.load_items_config()
+            if self.zombie_virus_manager is not None:
+                self.zombie_virus_manager.load_settings()
+                self.zombie_virus_manager.load_sources_config()
             if self.thirst_task is not None:
                 try:
                     self.thirst_task.cancel()
@@ -287,17 +340,19 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._start_thirst_timer()
             if self.nutrition_manager is not None:
                 self.nutrition_manager.start_timer()
+            if self.zombie_virus_manager is not None:
+                self.zombie_virus_manager.start_timer()
         except Exception as e:
             self._safe_log('error', f"[ARS] reload settings error: {e}")
 
     def _show_survival_config_panel(self, player) -> None:
         try:
             nm = self.nutrition_manager
+            zvm = self.zombie_virus_manager
             title = "ARC Realistic Survival 配置"
             content_lines = [
                 "修改后提交即写入配置并热重载",
-                "口渴: tick秒/倍数/整数",
-                "营养: 衰减秒数/每次衰减/初始值/提示冷却",
+                "口渴/营养/感染: 见各字段说明",
             ]
             header = Label(text="\n".join(content_lines))
             input_tick = TextInput(
@@ -340,6 +395,26 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 placeholder="症状提示冷却（秒）",
                 default_value=str(nm.nutrition_warn_cooldown_seconds if nm else 300)
             )
+            input_infection_tick = TextInput(
+                label="infection_tick_seconds",
+                placeholder="感染 tick 间隔（秒）",
+                default_value=str(zvm.infection_tick_seconds if zvm else 12)
+            )
+            input_infection_threshold = TextInput(
+                label="infection_threshold",
+                placeholder="恶化临界值（默认50）",
+                default_value=str(int(zvm.infection_threshold if zvm else 50))
+            )
+            input_infection_growth = TextInput(
+                label="infection_growth_per_minute",
+                placeholder="超临界每分钟增长",
+                default_value=str(int(zvm.infection_growth_per_minute if zvm else 5))
+            )
+            input_infection_decay = TextInput(
+                label="infection_decay_per_minute",
+                placeholder="低于临界每分钟下降",
+                default_value=str(int(zvm.infection_decay_per_minute if zvm else 2))
+            )
 
             def on_submit(sender, json_str: str):
                 try:
@@ -352,6 +427,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     new_n_decay = int(float(data[6]))
                     new_n_initial = int(float(data[7]))
                     new_n_cooldown = int(float(data[8]))
+                    new_i_tick = int(float(data[9]))
+                    new_i_threshold = float(data[10])
+                    new_i_growth = float(data[11])
+                    new_i_decay = float(data[12])
 
                     if new_tick < 1:
                         raise ValueError("thirst tick seconds < 1")
@@ -369,6 +448,12 @@ class ARCRealisticSurvivalPlugin(Plugin):
                         raise ValueError("nutrition initial out of [0,100]")
                     if new_n_cooldown < 30:
                         raise ValueError("nutrition cooldown < 30")
+                    if new_i_tick < 6:
+                        raise ValueError("infection tick seconds < 6")
+                    if new_i_threshold < 1 or new_i_threshold > 99:
+                        raise ValueError("infection threshold out of (0,100)")
+                    if new_i_growth < 0 or new_i_decay < 0:
+                        raise ValueError("infection growth/decay < 0")
 
                     self.setting_manager.SetSetting("thirst_tick_seconds", str(new_tick))
                     self.setting_manager.SetSetting("thirst_decay_per_tick", str(new_decay))
@@ -378,6 +463,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     self.setting_manager.SetSetting("nutrition_decay_per_tick", str(new_n_decay))
                     self.setting_manager.SetSetting("nutrition_initial", str(new_n_initial))
                     self.setting_manager.SetSetting("nutrition_warn_cooldown_seconds", str(new_n_cooldown))
+                    self.setting_manager.SetSetting("infection_tick_seconds", str(new_i_tick))
+                    self.setting_manager.SetSetting("infection_threshold", str(new_i_threshold))
+                    self.setting_manager.SetSetting("infection_growth_per_minute", str(new_i_growth))
+                    self.setting_manager.SetSetting("infection_decay_per_minute", str(new_i_decay))
 
                     self._reload_survival_settings()
                     sender.send_message("[ARS] 配置已保存并重载")
@@ -389,6 +478,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 controls=[
                     header, input_tick, input_decay, input_move, input_initial,
                     input_nutrition_tick, input_nutrition_decay, input_nutrition_initial, input_nutrition_cooldown,
+                    input_infection_tick, input_infection_threshold, input_infection_growth, input_infection_decay,
                 ],
                 on_close=lambda s: None,
                 on_submit=on_submit
@@ -420,6 +510,30 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def _on_nutrition_panel_submit(self, player, index: int) -> None:
         if index == 0:
             self._show_nutrition_panel(player)
+
+    def _show_infection_panel(self, player) -> None:
+        try:
+            if self.zombie_virus_manager is None:
+                player.send_message("[ARS] 感染系统未初始化")
+                return
+            status_lines = self.zombie_virus_manager.get_status_lines(player)
+            catalog_lines = self.zombie_virus_manager.get_source_catalog_lines(limit=15)
+            body = "\n".join(status_lines + [""] + catalog_lines)
+            form = ActionForm(
+                title="丧尸病毒感染",
+                content=body,
+                buttons=[Button("刷新"), Button("关闭")],
+                on_submit=lambda s, idx: self._on_infection_panel_submit(s, idx),
+                on_close=lambda s: None,
+            )
+            player.send_form(form)
+        except Exception as e:
+            self._safe_log('error', f"[ARS] show infection panel error: {e}")
+            player.send_message(f"[ARS] 无法打开感染面板: {e}")
+
+    def _on_infection_panel_submit(self, player, index: int) -> None:
+        if index == 0:
+            self._show_infection_panel(player)
     
     # 数据库（仅生存）
 
@@ -683,6 +797,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._load_player_thirst(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_join(player)
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.on_player_join(player)
 
     @event_handler()
     def on_player_quit(self, event: PlayerQuitEvent):
@@ -690,6 +806,13 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._persist_player_thirst(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_quit(player)
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.on_player_quit(player)
+
+    @event_handler()
+    def on_actor_damage(self, event: ActorDamageEvent):
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.on_actor_damage(event)
 
     @event_handler()
     def on_player_move(self, event: PlayerMoveEvent):

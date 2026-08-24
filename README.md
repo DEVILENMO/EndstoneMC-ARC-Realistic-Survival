@@ -2,7 +2,7 @@
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 
 
-一个为 Endstone 服务器打造的真实生存插件，添加口渴值系统、营养学系统、物品效果等功能，让生存体验更加真实有趣。
+一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
 
 ## ✨ 功能特性
 
@@ -19,6 +19,12 @@
 - **症状分级**：健康 / 轻症 / 中症 / 重症，仅在等级变化时 Toast 提示
 - **食物绑定**：每种食物可配置四种营养素加成（SQLite `nutrition_items` 表）
 - **原生 API**：通过 Endstone `Effect` 与 `AttributeModifier` 实现减益，不污染实体 NBT
+
+### 🧟 丧尸病毒系统
+- **感染值 0-100**：被配置的生物攻击会增加感染值
+- **可配置感染源**：支持精确实体（如 `minecraft:zombie`）或整命名空间（如 `minecraft:`），单独实体优先于命名空间规则
+- **临界恶化**：默认超过 50 后每分钟 +5，低于 50 每分钟 -2
+- **丧尸化**：感染满 100 时玩家死亡，原地生成丧尸，感染值归零
 
 ### 🍺 物品效果系统
 - **自定义物品效果**：通过配置文件自定义任意物品的效果
@@ -76,7 +82,23 @@ nutrition_tick_seconds: 300      # 营养衰减间隔（秒）
 nutrition_decay_per_tick: 1      # 每次衰减的营养值
 nutrition_initial: 100           # 玩家初始营养值
 nutrition_warn_cooldown_seconds: 300  # 症状提示冷却（秒）
+infection_tick_seconds: 12        # 感染 tick 间隔（秒）
+infection_threshold: 50           # 恶化临界值
+infection_growth_per_minute: 5    # 超临界每分钟增长
+infection_decay_per_minute: 2     # 低于临界每分钟下降
+infection_zombie_entity: minecraft:zombie  # 丧尸化时生成的实体
 ```
+
+### 感染源配置 (infection_sources)
+
+存储在 SQLite 表 `infection_sources`（首次启动自动播种常见僵尸类生物）：
+
+| match_pattern | 含义 | 示例 delta |
+|---------------|------|------------|
+| `minecraft:zombie` | 精确匹配该实体 | +5/击 |
+| `minecraft:` | 匹配整个命名空间下所有实体 | +2/击 |
+
+单独实体配置优先于命名空间规则。
 
 ### 营养与缺素病
 
@@ -122,6 +144,8 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 | `/ars reload` | `arc_realistic_survival.command.config` | 重载配置 |
 | `/ars nutrition` | 无 | 打开营养学面板（查看四条营养值与食物表） |
 | `/ars nutriset <玩家> <营养素> <0-100>` | OP | 调试：设置玩家指定营养素 |
+| `/ars infection` | 无 | 打开感染面板（感染值与感染源表） |
+| `/ars infectset <玩家> <0-100>` | OP | 调试：设置玩家感染值 |
 
 ### 权限节点
 
@@ -146,6 +170,11 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
    - 进食匹配 `nutrition_items` 的食物可补充对应营养
    - 使用 `/ars nutrition` 查看当前状态与食物营养表
 
+5. **丧尸病毒**：
+   - 被配置生物攻击增加感染值
+   - 超过临界值持续恶化，满值丧尸化
+   - 使用 `/ars infection` 查看当前感染状态
+
 ## 🗄️ 数据存储
 
 插件使用 SQLite 数据库存储玩家数据：
@@ -154,7 +183,8 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 - **存储内容**：
   - 玩家口渴值
   - 玩家四种营养素数值
-  - 口渴/营养物品配置表
+  - 玩家感染值
+  - 口渴/营养/感染物品与来源配置表
   - 最后更新时间
   - 玩家名称
 
@@ -182,6 +212,7 @@ src/endstone_arc_realistic_survival/
 ├── __init__.py              # 插件入口
 ├── arc_realistic_survival.py # 主插件逻辑
 ├── NutritionManager.py      # 营养学系统
+├── ZombieVirusManager.py    # 丧尸病毒系统
 ├── DatabaseManager.py       # 数据库管理器
 ├── LanguageManager.py       # 语言管理器
 └── SettingManager.py        # 设置管理器
@@ -198,6 +229,11 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.0
+- 新增丧尸病毒感染系统（可配置感染源、临界恶化、满值丧尸化）
+- `/ars infection` 感染面板与 `/ars infectset` 调试命令
+- OP 配置面板增加感染相关参数
 
 ### v0.2.0
 - 新增营养学系统（维生素 A/C、铁、蛋白质）
