@@ -16,6 +16,7 @@ from .NutritionManager import NUTRIENT_KEYS, NutritionManager
 from .SettingManager import SettingManager
 from .ZombieVirusManager import ZombieVirusManager
 from .effect_compat import apply_mob_effect, resolve_effect_type
+from .pack_effects import ARC_PACK_EFFECTS, get_pack_effect, normalize_item_id
 
 
 class ARCRealisticSurvivalPlugin(Plugin):
@@ -37,14 +38,29 @@ class ARCRealisticSurvivalPlugin(Plugin):
             "permissions": ["arc_realistic_survival.command.common"],
         },
         "heal": {
-            "description": "治愈缺素病症并将营养设为 80（不影响丧尸感染；仅 OP/控制台）",
+            "description": "治愈缺素病症并将营养设为 80（不影响丧尸感染；仅 OP/控制台；物品模组不用）",
             "usages": ["/heal <player: player>"],
             "permissions": ["arc_realistic_survival.command.admin"],
         },
         "purify": {
-            "description": "净化玩家感染值（仅 OP/控制台）",
+            "description": "净化玩家感染值；物品模组可对自身调用，改他人需 OP",
             "usages": ["/purify <player: player> <amount: float>"],
-            "permissions": ["arc_realistic_survival.command.admin"],
+            "permissions": ["arc_realistic_survival.command.item"],
+        },
+        "thirstadd": {
+            "description": "增减口渴值；物品模组对接（自身可用，改他人需 OP）",
+            "usages": ["/thirstadd <player: player> <delta: float>"],
+            "permissions": ["arc_realistic_survival.command.item"],
+        },
+        "nutriadd": {
+            "description": "增减营养素；nutrient=vitamin_a|vitamin_c|iron|protein|all",
+            "usages": ["/nutriadd <player: player> <nutrient: str> <delta: int>"],
+            "permissions": ["arc_realistic_survival.command.item"],
+        },
+        "arseffect": {
+            "description": "按 ARC 物品包目录一次性施加口渴/营养/净化（物品模组主入口）",
+            "usages": ["/arseffect <player: player> <item_id: str>"],
+            "permissions": ["arc_realistic_survival.command.item"],
         },
     }
 
@@ -58,8 +74,12 @@ class ARCRealisticSurvivalPlugin(Plugin):
             "default": "op",
         },
         "arc_realistic_survival.command.admin": {
-            "description": "允许使用 /heal、/purify 高级管理命令（OP/控制台）",
+            "description": "允许使用 /heal 及对任意玩家使用物品对接指令（OP/控制台）",
             "default": "op",
+        },
+        "arc_realistic_survival.command.item": {
+            "description": "允许对自身使用 /thirstadd、/nutriadd、/purify、/arseffect（物品模组）",
+            "default": True,
         },
     }
 
@@ -478,11 +498,186 @@ class ARCRealisticSurvivalPlugin(Plugin):
             pass
         return False
 
+    def _is_same_player(self, sender, target) -> bool:
+        if sender is None or target is None:
+            return False
+        try:
+            if sender is target:
+                return True
+        except Exception:
+            pass
+        try:
+            sx = self._get_player_xuid(sender)
+            tx = self._get_player_xuid(target)
+            if sx and tx and sx == tx:
+                return True
+        except Exception:
+            pass
+        try:
+            return str(getattr(sender, "name", "")).lower() == str(getattr(target, "name", "")).lower()
+        except Exception:
+            return False
+
+    def _can_item_affect(self, sender, target) -> bool:
+        """物品对接指令：控制台/OP 可改任意人；普通玩家仅可改自己。"""
+        if target is None:
+            return False
+        if self._is_admin_sender(sender):
+            return True
+        if not hasattr(sender, "game_mode") and not hasattr(sender, "xuid"):
+            return True
+        try:
+            if not sender.has_permission("arc_realistic_survival.command.item"):
+                return False
+        except Exception:
+            pass
+        return self._is_same_player(sender, target)
+
     def _resolve_online_player(self, name: str):
         try:
             return self.server.get_player(name)
         except Exception:
             return None
+
+    def _sync_creative_snap_nutrition(self, target, data: dict) -> None:
+        xuid = self._get_player_xuid(target)
+        snap = self._creative_snapshots.get(xuid)
+        if snap is not None:
+            snap["nutrition"] = dict(data)
+
+    def _sync_creative_snap_infection(self, target, value: float) -> None:
+        xuid = self._get_player_xuid(target)
+        snap = self._creative_snapshots.get(xuid)
+        if snap is not None:
+            snap["infection"] = float(value)
+
+    def _sync_creative_snap_thirst(self, target, value: int) -> None:
+        xuid = self._get_player_xuid(target)
+        snap = self._creative_snapshots.get(xuid)
+        if snap is not None:
+            snap["thirst"] = int(value)
+
+    def _cmd_apply_thirst_delta(self, sender, target, delta: float, quiet: bool = False) -> bool:
+        try:
+            new_val = self._apply_thirst_delta(target, int(round(delta)), reason="command")
+            self._persist_player_thirst(target)
+            self._sync_creative_snap_thirst(target, new_val)
+            if not quiet:
+                sender.send_message(
+                    f"[ARS] {target.name} 口渴 {int(delta):+d} → {int(new_val)}"
+                )
+            return True
+        except Exception as e:
+            sender.send_message(f"[ARS] 口渴调整失败: {e}")
+            return False
+
+    def _cmd_apply_nutri_delta(self, sender, target, nutrient: str, delta: int, quiet: bool = False) -> bool:
+        if self.nutrition_manager is None:
+            sender.send_message("[ARS] 营养系统未初始化")
+            return False
+        key = str(nutrient).lower().strip()
+        try:
+            if key == "all":
+                deltas = {k: int(delta) for k in NUTRIENT_KEYS}
+            elif key in NUTRIENT_KEYS:
+                deltas = {key: int(delta)}
+            else:
+                sender.send_message("[ARS] 营养素须为: vitamin_a, vitamin_c, iron, protein, all")
+                return False
+            data = self.nutrition_manager.apply_deltas(target, deltas, item_label="command")
+            self.nutrition_manager.persist_player(target)
+            self._sync_creative_snap_nutrition(target, data)
+            if not quiet:
+                shown = ",".join(f"{k}{v:+d}" for k, v in deltas.items())
+                sender.send_message(f"[ARS] {target.name} 营养 {shown}")
+            return True
+        except Exception as e:
+            sender.send_message(f"[ARS] 营养调整失败: {e}")
+            return False
+
+    def _cmd_apply_purify(self, sender, target, amount: float, quiet: bool = False) -> bool:
+        if not self._is_infection_enabled():
+            if not quiet:
+                sender.send_message("[ARS] 感染系统已关闭（infection_enabled=false）")
+            return False
+        if self.zombie_virus_manager is None:
+            sender.send_message("[ARS] 感染系统未初始化")
+            return False
+        if amount <= 0:
+            sender.send_message("[ARS] 净化量必须大于 0")
+            return False
+        try:
+            xuid = self._get_player_xuid(target)
+            old = float(self.zombie_virus_manager.player_infection.get(xuid, 0.0))
+            new_val = self.zombie_virus_manager.apply_delta(
+                target, -float(amount), source_label="净化"
+            )
+            self._sync_creative_snap_infection(target, new_val)
+            removed = max(0.0, old - float(new_val))
+            if not quiet:
+                sender.send_message(
+                    f"[ARS] 已净化 {target.name} 感染 -{removed:.0f}：{int(old)} → {int(new_val)}"
+                )
+            try:
+                target.send_toast("净化", f"感染值降低了 {int(removed)} 点。")
+            except Exception:
+                pass
+            return True
+        except Exception as e:
+            sender.send_message(f"[ARS] 净化失败: {e}")
+            return False
+
+    def _cmd_apply_pack_effect(self, sender, target, item_id: str, quiet: bool = False) -> bool:
+        effect = get_pack_effect(item_id)
+        if effect is None:
+            known = ", ".join(sorted(ARC_PACK_EFFECTS.keys()))
+            sender.send_message(f"[ARS] 未知物品ID: {item_id}\n可用: {known}")
+            return False
+        label = effect.get("label") or item_id
+        thirst = int(effect.get("thirst", 0) or 0)
+        infection = int(effect.get("infection", 0) or 0)
+        nutri = {k: int(effect.get(k, 0) or 0) for k in NUTRIENT_KEYS}
+        bits = []
+
+        if thirst:
+            if self._cmd_apply_thirst_delta(sender, target, thirst, quiet=True):
+                bits.append(f"口渴{thirst:+d}")
+        if any(v != 0 for v in nutri.values()):
+            if self.nutrition_manager is None:
+                sender.send_message("[ARS] 营养系统未初始化")
+                return False
+            try:
+                data = self.nutrition_manager.apply_deltas(target, nutri, item_label=label)
+                self.nutrition_manager.persist_player(target)
+                self._sync_creative_snap_nutrition(target, data)
+                bits.extend(f"{k}{v:+d}" for k, v in nutri.items() if v)
+            except Exception as e:
+                sender.send_message(f"[ARS] 营养调整失败: {e}")
+                return False
+        if infection < 0:
+            # infection 存的是负增量，净化量为正
+            if self._cmd_apply_purify(sender, target, abs(infection), quiet=True):
+                bits.append(f"感染{infection:+d}")
+        elif infection > 0:
+            if self._is_infection_enabled() and self.zombie_virus_manager is not None:
+                try:
+                    new_val = self.zombie_virus_manager.apply_delta(
+                        target, float(infection), source_label=label
+                    )
+                    self._sync_creative_snap_infection(target, new_val)
+                    bits.append(f"感染{infection:+d}")
+                except Exception as e:
+                    sender.send_message(f"[ARS] 感染调整失败: {e}")
+                    return False
+
+        if not quiet:
+            detail = " ".join(bits) if bits else "无变化"
+            sender.send_message(f"[ARS] {label} → {target.name}: {detail}")
+        try:
+            target.send_toast(label, " ".join(bits) if bits else "已使用")
+        except Exception:
+            pass
+        return True
 
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
         match command.name:
@@ -502,11 +697,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     return True
                 try:
                     data = self.nutrition_manager.heal_to(target, 80)
-                    # 若处于创造旁观快照，同步写回营养，避免切回生存又变病
-                    xuid = self._get_player_xuid(target)
-                    snap = self._creative_snapshots.get(xuid)
-                    if snap is not None:
-                        snap["nutrition"] = dict(data)
+                    self._sync_creative_snap_nutrition(target, data)
                     sender.send_message(
                         f"[ARS] 已治愈 {target.name}：营养已设为 80，缺素病症已清除（感染未改动）"
                     )
@@ -519,12 +710,6 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 return True
 
             case "purify":
-                if not self._is_admin_sender(sender):
-                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
-                    return True
-                if not self._is_infection_enabled():
-                    sender.send_message("[ARS] 感染系统已关闭（infection_enabled=false）")
-                    return True
                 if len(args) < 2:
                     sender.send_message("[ARS] 用法: /purify <玩家> <净化量>")
                     return True
@@ -532,37 +717,71 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 if target is None:
                     sender.send_message(f"[ARS] 找不到玩家: {args[0]}")
                     return True
+                if not self._can_item_affect(sender, target):
+                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                    return True
                 try:
                     amount = float(args[1])
                 except ValueError:
                     sender.send_message("[ARS] 净化量必须是数字")
                     return True
-                if amount <= 0:
-                    sender.send_message("[ARS] 净化量必须大于 0")
+                self._cmd_apply_purify(sender, target, amount)
+                return True
+
+            case "thirstadd":
+                if len(args) < 2:
+                    sender.send_message("[ARS] 用法: /thirstadd <玩家> <增量>")
                     return True
-                if self.zombie_virus_manager is None:
-                    sender.send_message("[ARS] 感染系统未初始化")
+                target = self._resolve_online_player(args[0])
+                if target is None:
+                    sender.send_message(f"[ARS] 找不到玩家: {args[0]}")
+                    return True
+                if not self._can_item_affect(sender, target):
+                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
                     return True
                 try:
-                    xuid = self._get_player_xuid(target)
-                    old = float(self.zombie_virus_manager.player_infection.get(xuid, 0.0))
-                    new_val = self.zombie_virus_manager.apply_delta(
-                        target, -amount, source_label="净化"
-                    )
-                    snap = self._creative_snapshots.get(xuid)
-                    if snap is not None:
-                        snap["infection"] = float(new_val)
-                    removed = max(0.0, old - float(new_val))
+                    delta = float(args[1])
+                except ValueError:
+                    sender.send_message("[ARS] 增量必须是数字")
+                    return True
+                self._cmd_apply_thirst_delta(sender, target, delta)
+                return True
+
+            case "nutriadd":
+                if len(args) < 3:
                     sender.send_message(
-                        f"[ARS] 已净化 {target.name} 感染 -{removed:.0f}："
-                        f"{int(old)} → {int(new_val)}"
+                        "[ARS] 用法: /nutriadd <玩家> <vitamin_a|vitamin_c|iron|protein|all> <增量>"
                     )
-                    try:
-                        target.send_toast("净化", f"感染值降低了 {int(removed)} 点。")
-                    except Exception:
-                        pass
-                except Exception as e:
-                    sender.send_message(f"[ARS] 净化失败: {e}")
+                    return True
+                target = self._resolve_online_player(args[0])
+                if target is None:
+                    sender.send_message(f"[ARS] 找不到玩家: {args[0]}")
+                    return True
+                if not self._can_item_affect(sender, target):
+                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                    return True
+                try:
+                    delta = int(args[2])
+                except ValueError:
+                    sender.send_message("[ARS] 增量必须是整数")
+                    return True
+                self._cmd_apply_nutri_delta(sender, target, args[1], delta)
+                return True
+
+            case "arseffect":
+                if len(args) < 2:
+                    sender.send_message("[ARS] 用法: /arseffect <玩家> <物品ID>")
+                    sender.send_message("[ARS] 示例: /arseffect Steve arc:bottled_water")
+                    return True
+                target = self._resolve_online_player(args[0])
+                if target is None:
+                    sender.send_message(f"[ARS] 找不到玩家: {args[0]}")
+                    return True
+                if not self._can_item_affect(sender, target):
+                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                    return True
+                item_id = normalize_item_id(" ".join(args[1:]))
+                self._cmd_apply_pack_effect(sender, target, item_id)
                 return True
 
             case "ars":

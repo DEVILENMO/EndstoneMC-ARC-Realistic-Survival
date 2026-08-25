@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.20-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.21-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -163,12 +163,46 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 | `/ars nutriset <玩家> <营养素> <0-100>` | OP | 调试：设置玩家指定营养素 |
 | `/ars infection` | 无 | 打开感染面板（感染值与感染源表） |
 | `/ars infectset <玩家> <0-100>` | OP | 调试：设置玩家感染值 |
-| `/heal <玩家>` | OP/控制台 | 治愈缺素病症，四项营养设为 80（不影响感染） |
-| `/purify <玩家> <数量>` | OP/控制台 | 净化感染：感染值减少指定数量 |
+| `/heal <玩家>` | OP/控制台 | 管理用：治愈缺素并将四项营养设为 80（**不影响感染**；物品模组不用） |
+| `/purify <玩家> <数量>` | 自身 / OP | 净化感染：感染值减少指定数量 |
+| `/thirstadd <玩家> <增量>` | 自身 / OP | **物品模组对接**：增减口渴值 |
+| `/nutriadd <玩家> <营养素\|all> <增量>` | 自身 / OP | **物品模组对接**：增减营养（`vitamin_a` / `vitamin_c` / `iron` / `protein` / `all`） |
+| `/arseffect <玩家> <物品ID>` | 自身 / OP | **物品模组主入口**：按内置目录一次性施加口渴/营养/净化 |
+
+> 普通玩家仅能对**自己**使用 `/thirstadd`、`/nutriadd`、`/purify`、`/arseffect`；改他人需 OP。权限节点：`arc_realistic_survival.command.item`（默认允许）。
+
+### 与 ARC 真实生存物品包对接
+
+行为包消耗药品/饮水后会执行：
+
+```text
+/arseffect <玩家名> arc:bottled_water
+```
+
+插件内置目录（`pack_effects.py`）示例：
+
+| 物品 ID | 效果 |
+|---------|------|
+| `arc:bottled_water` | 口渴 +42 |
+| `arc:vitamin_a_pill` | 维A +30 |
+| `arc:vitamin_c_tablet` | 维C +30 |
+| `arc:iron_supplement` | 铁 +30 |
+| `arc:protein_shot` | 蛋白 +30 |
+| `arc:multivitamin` | 四项各 +14 |
+| `arc:field_ration_med` | 四项各 +8，口渴 +10 |
+| `arc:recovery_injection` | 四项各 +20 |
+| `arc:antiviral_weak` | 感染 -15（等同 purify） |
+| `arc:antiviral_strong` | 感染 -40 |
+| `arc:purge_serum` | 感染 -85 |
+
+也可拆开调用，例如：`/thirstadd Steve 42`、`/nutriadd Steve vitamin_a 30`、`/purify Steve 15`。
 
 ### 权限节点
 
-- `arc_realistic_survival.command.config` - 允许使用配置命令（默认：仅OP）
+- `arc_realistic_survival.command.common` - 基础面板（默认：全体）
+- `arc_realistic_survival.command.config` - 配置 / reload / 调试 set（默认：OP）
+- `arc_realistic_survival.command.admin` - `/heal` 及对任意玩家使用对接指令（默认：OP）
+- `arc_realistic_survival.command.item` - 对自身使用对接指令（默认：全体）
 
 ### 游戏机制
 
@@ -238,6 +272,7 @@ src/endstone_arc_realistic_survival/
 ├── arc_realistic_survival.py # 主插件逻辑
 ├── NutritionManager.py      # 营养学系统
 ├── ZombieVirusManager.py    # 丧尸病毒系统
+├── pack_effects.py          # ARC 物品包效果目录（/arseffect）
 ├── DatabaseManager.py       # 数据库管理器
 ├── LanguageManager.py       # 语言管理器
 └── SettingManager.py        # 设置管理器
@@ -254,6 +289,11 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.21
+- 物品模组对接指令：`/thirstadd`、`/nutriadd`、`/arseffect`；`/purify` 允许对自身调用
+- 内置 ARC 真实生存物品效果目录（`pack_effects.py`）：饮水、缺素药、综合营养、抗病毒
+- `/heal` 仍为管理用一键营养 80，物品逻辑不使用
 
 ### v0.3.20
 - 进食/饮水 `[consume]` 诊断日志默认关闭；仅 `thirst_consume_debug=true` 时输出
