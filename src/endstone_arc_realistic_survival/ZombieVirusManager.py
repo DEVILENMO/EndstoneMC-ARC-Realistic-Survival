@@ -380,14 +380,14 @@ class ZombieVirusManager:
             self._transforming.discard(xuid)
 
     def reset_on_death(self, player) -> None:
-        """死亡时清零感染（口渴由主插件重置，营养不重置）。"""
+        """任意死亡：内存与数据库立刻清零感染。"""
         xuid = self._get_xuid(player)
         self._transforming.discard(xuid)
         self.player_infection[xuid] = 0.0
         self.persist_player(player)
 
     def reset_on_respawn(self, player) -> None:
-        """重生时再强制清零并落库，防止死亡事件未触发或写库失败导致感染残留。"""
+        """重生再强制清零落库，双保险。"""
         xuid = self._get_xuid(player)
         self._transforming.discard(xuid)
         self.player_infection[xuid] = 0.0

@@ -1125,12 +1125,19 @@ class ARCRealisticSurvivalPlugin(Plugin):
     @event_handler()
     def on_player_death(self, event: PlayerDeathEvent):
         player = event.player
-        # 感染：任意死亡都清零（含丧尸化自杀），不依赖生存模式判断
+        xuid = self._get_player_xuid(player)
+        # 任意死亡立刻清零感染（内存+数据库）；创造快照里的感染也清掉，防止切回生存又恢复
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.reset_on_death(player)
+        snap = self._creative_snapshots.get(xuid)
+        if snap is not None:
+            snap["infection"] = 0.0
         if not self._is_survival_like(player):
             return
         self._reset_player_thirst(player)
+        if snap is not None:
+            snap["thirst"] = self.thirst_initial
+            snap["dehydrated_since"] = None
 
     @event_handler()
     def on_player_respawn(self, event: PlayerRespawnEvent):
