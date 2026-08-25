@@ -76,7 +76,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._creative_snapshots = {}
         self.nutrition_manager = None
         self.zombie_virus_manager = None
-    
+        self.economy_plugin = None
+        self._sidebar_page_id = "ars_health"
+        self._sidebar_registered = False
+
     def _safe_log(self, level: str, message: str):
         """
         安全的日志记录方法，在logger未初始化时使用print
@@ -173,6 +176,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
         # 初始化经济插件 - 检查 arc_core 优先，然后 umoney
         self._init_economy_plugin()
+        # 向弧光核心注册真实生存侧边栏页面
+        self._register_sidebar_page()
         # 启动口渴值定时任务
         self._start_thirst_timer()
         # 启动营养学定时任务
@@ -180,10 +185,20 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self.nutrition_manager.start_timer()
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.start_timer()
+        # 热重载时给已在线玩家补推侧边栏
+        try:
+            for online in list(self.server.online_players or []):
+                self._push_sidebar_for_player(online)
+        except Exception:
+            pass
 
     def on_disable(self) -> None:
         self._safe_log('info', "[ARCRealisticSurvival] on_disable is called!")
-        
+        try:
+            self._unregister_sidebar_page()
+        except Exception:
+            pass
+
         # 关闭数据库连接
         if hasattr(self, 'db_manager'):
             self.db_manager.close()
@@ -210,7 +225,167 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     self.zombie_virus_manager.persist_player(player)
         except Exception:
             pass
-    
+
+    def _get_arc_core(self):
+        """优先复用已探测的 arc_core，否则再向插件管理器查询。"""
+        try:
+            plugin = getattr(self, "economy_plugin", None)
+            if plugin is not None and getattr(plugin, "name", None) == "arc_core":
+                return plugin
+            if plugin is not None and callable(getattr(plugin, "api_sidebar_register_page", None)):
+                return plugin
+        except Exception:
+            pass
+        try:
+            return self.server.plugin_manager.get_plugin("arc_core")
+        except Exception:
+            return None
+
+    def _register_sidebar_page(self) -> None:
+        """向弧光核心注册真实生存健康侧边栏页面。"""
+        self._sidebar_registered = False
+        arc = self._get_arc_core()
+        if arc is None:
+            self._safe_log(
+                "warning",
+                "[ARCRealisticSurvival] arc_core 未加载，跳过侧边栏页面注册",
+            )
+            return
+        register = getattr(arc, "api_sidebar_register_page", None)
+        if not callable(register):
+            self._safe_log(
+                "warning",
+                "[ARCRealisticSurvival] 当前 arc_core 不支持侧边栏 API，请升级到 v0.9.0+",
+            )
+            return
+        try:
+            ok = register(
+                self._sidebar_page_id,
+                "§a真实生存",
+                [
+                    "§7§m----------------",
+                    "§b口渴 §f{thirst}§7/100",
+                    "§e维A §f{vitamin_a} §7{sev_a}",
+                    "§e维C §f{vitamin_c} §7{sev_c}",
+                    "§6铁 §f{iron} §7{sev_iron}",
+                    "§6蛋白 §f{protein} §7{sev_protein}",
+                    "§c感染 §f{infection}§7/{infection_max}",
+                    "§7{infection_status}",
+                    "§7§m----------------",
+                ],
+                owner="arc_realistic_survival",
+                priority=10,
+                hide_line_if_missing=True,
+            )
+            self._sidebar_registered = bool(ok)
+            if self._sidebar_registered:
+                self._safe_log(
+                    "info",
+                    "[ARCRealisticSurvival] 已向弧光核心注册侧边栏页面 ars_health",
+                )
+            else:
+                self._safe_log(
+                    "warning",
+                    "[ARCRealisticSurvival] 侧边栏页面注册返回失败",
+                )
+        except Exception as e:
+            self._safe_log("error", f"[ARCRealisticSurvival] 侧边栏页面注册异常: {e}")
+
+    def _unregister_sidebar_page(self) -> None:
+        if not self._sidebar_registered:
+            return
+        arc = self._get_arc_core()
+        unregister = getattr(arc, "api_sidebar_unregister_page", None) if arc else None
+        if callable(unregister):
+            try:
+                unregister(self._sidebar_page_id)
+            except Exception:
+                pass
+        self._sidebar_registered = False
+
+    def _severity_short_label(self, severity: str) -> str:
+        mapping = {
+            "healthy": "§a健",
+            "mild": "§e轻",
+            "moderate": "§6中",
+            "severe": "§c重",
+        }
+        return mapping.get(str(severity or "healthy"), "§7?")
+
+    def _build_sidebar_values(self, player) -> dict:
+        """汇总口渴 / 营养 / 感染，供侧边栏键值模板使用。"""
+        xuid = self._get_player_xuid(player)
+        thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
+
+        vitamin_a = vitamin_c = iron = protein = 100
+        sev_a = sev_c = sev_iron = sev_protein = self._severity_short_label("healthy")
+        if self.nutrition_manager is not None:
+            nm = self.nutrition_manager
+            data = nm.player_nutrition.get(xuid) or nm._default_nutrition()
+            vitamin_a = int(data.get("vitamin_a", nm.nutrition_initial))
+            vitamin_c = int(data.get("vitamin_c", nm.nutrition_initial))
+            iron = int(data.get("iron", nm.nutrition_initial))
+            protein = int(data.get("protein", nm.nutrition_initial))
+            sev = nm.player_severity.get(xuid) or {}
+            sev_a = self._severity_short_label(sev.get("vitamin_a") or nm.get_severity(vitamin_a))
+            sev_c = self._severity_short_label(sev.get("vitamin_c") or nm.get_severity(vitamin_c))
+            sev_iron = self._severity_short_label(sev.get("iron") or nm.get_severity(iron))
+            sev_protein = self._severity_short_label(
+                sev.get("protein") or nm.get_severity(protein)
+            )
+
+        infection = 0
+        infection_max = 100
+        infection_status = "未感染"
+        if self.zombie_virus_manager is not None:
+            zm = self.zombie_virus_manager
+            infection = int(float(zm.player_infection.get(xuid, 0.0)))
+            infection_max = int(getattr(zm, "infection_max", 100) or 100)
+            threshold = float(getattr(zm, "infection_threshold", 50) or 50)
+            if infection <= 0:
+                infection_status = "未感染"
+            elif infection >= threshold:
+                infection_status = "§c恶化中"
+            else:
+                infection_status = "§a恢复中"
+
+        return {
+            "thirst": thirst,
+            "vitamin_a": vitamin_a,
+            "vitamin_c": vitamin_c,
+            "iron": iron,
+            "protein": protein,
+            "sev_a": sev_a,
+            "sev_c": sev_c,
+            "sev_iron": sev_iron,
+            "sev_protein": sev_protein,
+            "infection": infection,
+            "infection_max": infection_max,
+            "infection_status": infection_status,
+        }
+
+    def _push_sidebar_for_player(self, player) -> None:
+        """把当前生存状态推送到弧光核心侧边栏页面。"""
+        if player is None:
+            return
+        if not self._sidebar_registered:
+            # 晚加载的 arc_core：尝试再注册一次
+            self._register_sidebar_page()
+            if not self._sidebar_registered:
+                return
+        arc = self._get_arc_core()
+        set_values = getattr(arc, "api_sidebar_set_values", None) if arc else None
+        if not callable(set_values):
+            return
+        try:
+            xuid = str(self._get_player_xuid(player) or "").strip()
+            if not xuid:
+                return
+            values = self._build_sidebar_values(player)
+            set_values(self._sidebar_page_id, values, xuid=xuid)
+        except Exception as e:
+            self._safe_log("error", f"[ARCRealisticSurvival] push sidebar error: {e}")
+
     def _init_default_settings(self) -> None:
         """初始化默认配置"""
         # 交易税率 (默认5%)
@@ -847,6 +1022,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self.nutrition_manager.apply_healthy_bypass(player)
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.apply_healthy_bypass(player)
+        self._push_sidebar_for_player(player)
 
     def _leave_non_survival_mode(self, player) -> None:
         """切回生存/冒险：从快照恢复真实数值并重新挂效果。"""
@@ -871,6 +1047,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self.nutrition_manager.persist_player(player)
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.persist_player(player)
+        self._push_sidebar_for_player(player)
 
     def _restore_snapshot_before_persist(self, player) -> None:
         """退出时若仍在创造旁观，把快照写回内存再落库，避免把「正常值」存进数据库。"""
@@ -962,6 +1139,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         if new_val != current:
             msg = self.language_manager.GetText("THIRST_VALUE") or "当前口渴值: {value}"
             player.send_popup(msg.replace("{value}", str(new_val)))
+            self._push_sidebar_for_player(player)
         self._apply_thirst_movement_modifier(player)
         self._sync_dehydration_state(player)
         return new_val
@@ -974,6 +1152,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.player_xuid_to_dehydrated_since[xuid] = None
         self._persist_player_thirst(player)
         self._apply_thirst_movement_modifier(player)
+        self._push_sidebar_for_player(player)
 
     def _notify_dehydrated(self, player) -> None:
         title = self.language_manager.GetText("THIRST_DEHYDRATED_TITLE") or "严重脱水"
@@ -1087,6 +1266,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._sync_dehydration_state(player)
         else:
             self._enter_non_survival_mode(player)
+        self._push_sidebar_for_player(player)
 
     @event_handler()
     def on_player_quit(self, event: PlayerQuitEvent):

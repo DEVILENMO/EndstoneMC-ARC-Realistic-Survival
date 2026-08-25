@@ -329,6 +329,10 @@ class NutritionManager:
 
         self._notify_severity_changes(player, old_severity, new_severity)
         self._apply_persistent_symptoms(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
         return current
 
     def set_nutrient(self, player, nutrient: str, value: int) -> dict[str, int]:
@@ -345,6 +349,10 @@ class NutritionManager:
         self._notify_severity_changes(player, old_severity, new_severity)
         self._apply_persistent_symptoms(player)
         self.persist_player(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
         return current
 
     def _can_warn(self, xuid: str) -> bool:
@@ -562,6 +570,10 @@ class NutritionManager:
         self.player_nutrition[xuid] = data
         self.player_severity[xuid] = {k: "healthy" for k in NUTRIENT_KEYS}
         self.clear_symptoms(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
     def restore_nutrition(self, player, data: dict[str, int]) -> None:
         """从快照恢复真实营养并重新挂症状。"""
@@ -570,6 +582,10 @@ class NutritionManager:
         self.player_nutrition[xuid] = restored
         self.player_severity[xuid] = {k: self.get_severity(restored[k]) for k in NUTRIENT_KEYS}
         self._apply_persistent_symptoms(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
     def on_player_join(self, player) -> None:
         self.load_player(player)
@@ -643,6 +659,10 @@ class NutritionManager:
                         self._notify_severity_changes(player, old_severity, new_severity)
                     self._tick_symptoms_for_player(player)
                     self.persist_player(player)
+                    try:
+                        self.plugin._push_sidebar_for_player(player)
+                    except Exception:
+                        pass
             except Exception as e:
                 self._log("error", f"[ARS] nutrition timer error: {e}")
 

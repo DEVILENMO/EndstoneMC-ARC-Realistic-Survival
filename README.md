@@ -1,5 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![Version](https://img.shields.io/badge/version-v0.3.12-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -28,6 +29,12 @@
 - **可配置感染源**：支持精确实体（如 `minecraft:zombie`）或整命名空间（如 `minecraft:`），单独实体优先于命名空间规则
 - **临界恶化**：默认超过 50 后每分钟 +5，低于 50 每分钟 -2
 - **丧尸化**：感染满 100 时先清零感染并落库，再击杀玩家、原地生成丧尸（清零不依赖是否杀死成功）
+
+### 📊 弧光核心侧边栏（v0.3.12）
+- 启动时向 `arc_core` 注册专属页面 **`ars_health`（真实生存）**
+- 显示口渴、四种营养素及严重度、感染值与状态（未感染 / 恢复中 / 恶化中）
+- 数值变化、进服、创造旁路切换时自动推送；需弧光核心 **v0.9.0+**
+- 玩家可用 `/sidebar next` 翻到该页（页面数 ≥ 2 时也会自动轮播）
 
 ### 🍺 物品效果系统
 - **自定义物品效果**：通过配置文件自定义任意物品的效果
@@ -242,6 +249,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.12
+- ✅ **弧光核心侧边栏**：注册 `ars_health` 页面，展示口渴、营养四项与严重度、丧尸感染值/状态；数值变化时自动推送（需 arc_core ≥ 0.9.0）
 
 ### v0.3.11
 - 强化死亡清零感染：任意死亡立刻清零落库；同时清掉创造模式快照中的感染，避免切回生存被旧值写回

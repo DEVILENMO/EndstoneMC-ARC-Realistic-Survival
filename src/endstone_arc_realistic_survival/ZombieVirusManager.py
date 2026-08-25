@@ -256,6 +256,10 @@ class ZombieVirusManager:
             self._trigger_zombie_transform(player)
         else:
             self.persist_player(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
         return new_val
 
     def apply_delta(self, player, delta: float, source_label: str = "") -> float:
@@ -273,6 +277,10 @@ class ZombieVirusManager:
             self._trigger_zombie_transform(player)
         else:
             self.persist_player(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
         return new_val
 
     def _can_warn(self, xuid: str) -> bool:
@@ -322,6 +330,10 @@ class ZombieVirusManager:
             self.persist_player(player)
         except Exception as e:
             self._log("error", f"[ARS] persist infection clear on transform error: {e}")
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
         loc = None
         dimension = None
@@ -385,6 +397,10 @@ class ZombieVirusManager:
         self._transforming.discard(xuid)
         self.player_infection[xuid] = 0.0
         self.persist_player(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
     def reset_on_respawn(self, player) -> None:
         """重生再强制清零落库，双保险。"""
@@ -392,16 +408,28 @@ class ZombieVirusManager:
         self._transforming.discard(xuid)
         self.player_infection[xuid] = 0.0
         self.persist_player(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
     def apply_healthy_bypass(self, player) -> None:
         """创造/旁观：感染显示为 0，不写库。"""
         xuid = self._get_xuid(player)
         self.player_infection[xuid] = 0.0
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
     def restore_infection(self, player, value: float) -> None:
         """从快照恢复真实感染值。"""
         xuid = self._get_xuid(player)
         self.player_infection[xuid] = self._clamp(float(value))
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
 
     def on_player_join(self, player) -> None:
         self.load_player(player)
@@ -493,6 +521,10 @@ class ZombieVirusManager:
                         self._trigger_zombie_transform(player)
                     else:
                         self.persist_player(player)
+                    try:
+                        self.plugin._push_sidebar_for_player(player)
+                    except Exception:
+                        pass
             except Exception as e:
                 self._log("error", f"[ARS] infection timer error: {e}")
 
