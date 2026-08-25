@@ -8,7 +8,7 @@ from endstone import GameMode
 from endstone.command import Command, CommandSender
 from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent, PlayerGameModeChangeEvent
 from endstone.plugin import Plugin
-from endstone.form import ActionForm, Button, ModalForm, Label, TextInput
+from endstone.form import ActionForm, ModalForm, Label, TextInput
 
 from .DatabaseManager import DatabaseManager
 from .LanguageManager import LanguageManager
@@ -26,7 +26,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
     commands = {
         "ars": {
-            "description": "ARC Realistic Survival：营养/感染面板；OP 可开配置与调试。",
+            "description": "打开真实生存个人状态；OP 可从中进入配置管理。",
             "usages": [
                 "/ars",
                 "/ars nutrition",
@@ -66,11 +66,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
     permissions = {
         "arc_realistic_survival.command.common": {
-            "description": "允许使用 /ars nutrition、/ars infection 等基础指令",
+            "description": "全员：/ars 个人状态、/ars nutrition、/ars infection（对齐弧光核心 common）",
             "default": True,
         },
         "arc_realistic_survival.command.config": {
-            "description": "允许打开 /ars 配置面板及 reload / nutriset / infectset（OP）",
+            "description": "OP：配置面板、reload、nutriset、infectset（主面板内仅 OP 显示配置管理）",
             "default": "op",
         },
         "arc_realistic_survival.command.admin": {
@@ -868,22 +868,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
                         except Exception as e:
                             sender.send_message(f"[ARS] 设置失败: {e}")
                         return True
-                # 打开配置面板（仅玩家、且需要 config 权限 / OP）
+                # 全员打开个人状态；配置管理仅 OP 在面板内可见（对齐弧光核心 /arc）
                 if not hasattr(sender, 'send_form'):
                     sender.send_message(self.language_manager.GetText("PLAYER_ONLY_COMMAND") or "Players only")
                     return True
-                has_cfg = False
-                try:
-                    has_cfg = sender.has_permission("arc_realistic_survival.command.config")
-                except Exception:
-                    has_cfg = False
-                if has_cfg or getattr(sender, "is_op", False):
-                    self._show_survival_config_panel(sender)
-                else:
-                    sender.send_message(
-                        "[ARS] 用法: /ars nutrition | /ars infection\n"
-                        "配置面板需要 OP 权限（/ars）"
-                    )
+                self._show_ars_home_panel(sender)
                 return True
         return True
 
@@ -921,7 +910,48 @@ class ARCRealisticSurvivalPlugin(Plugin):
         except Exception as e:
             self._safe_log('error', f"[ARS] reload settings error: {e}")
 
+    def _show_ars_home_panel(self, player) -> None:
+        """个人状态主页（全员）；仅 OP 显示「配置管理」按钮。"""
+        try:
+            xuid = self._get_player_xuid(player)
+            thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
+            lines = [
+                "=== 个人状态 ===",
+                f"口渴: {thirst}/100",
+            ]
+            if self.nutrition_manager is not None:
+                lines.append("")
+                lines.extend(self.nutrition_manager.get_status_lines(player))
+            if self._is_infection_enabled() and self.zombie_virus_manager is not None:
+                lines.append("")
+                lines.extend(self.zombie_virus_manager.get_status_lines(player))
+
+            form = ActionForm(
+                title="真实生存",
+                content="\n".join(lines),
+                on_close=lambda s: None,
+            )
+            form.add_button("营养详情", on_click=self._show_nutrition_panel)
+            if self._is_infection_enabled():
+                form.add_button("感染详情", on_click=self._show_infection_panel)
+            if getattr(player, "is_op", False):
+                form.add_button("配置管理", on_click=self._show_survival_config_panel)
+            form.add_button("刷新", on_click=self._show_ars_home_panel)
+            player.send_form(form)
+        except Exception as e:
+            self._safe_log('error', f"[ARS] show home panel error: {e}")
+            try:
+                player.send_message(f"[ARS] 无法打开个人状态: {e}")
+            except Exception:
+                pass
+
     def _show_survival_config_panel(self, player) -> None:
+        if not getattr(player, "is_op", False):
+            try:
+                player.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+            except Exception:
+                pass
+            return
         try:
             nm = self.nutrition_manager
             zvm = self.zombie_virus_manager
@@ -1085,23 +1115,22 @@ class ARCRealisticSurvivalPlugin(Plugin):
             form = ActionForm(
                 title="营养学",
                 content=body,
-                buttons=[Button("刷新"), Button("关闭")],
-                on_submit=lambda s, idx: self._on_nutrition_panel_submit(s, idx),
                 on_close=lambda s: None,
             )
+            form.add_button("刷新", on_click=self._show_nutrition_panel)
+            form.add_button("返回", on_click=self._show_ars_home_panel)
             player.send_form(form)
         except Exception as e:
             self._safe_log('error', f"[ARS] show nutrition panel error: {e}")
             player.send_message(f"[ARS] 无法打开营养面板: {e}")
 
-    def _on_nutrition_panel_submit(self, player, index: int) -> None:
-        if index == 0:
-            self._show_nutrition_panel(player)
-
     def _show_infection_panel(self, player) -> None:
         try:
             if self.zombie_virus_manager is None:
                 player.send_message("[ARS] 感染系统未初始化")
+                return
+            if not self._is_infection_enabled():
+                player.send_message("[ARS] 感染系统已关闭（infection_enabled=false）")
                 return
             status_lines = self.zombie_virus_manager.get_status_lines(player)
             catalog_lines = self.zombie_virus_manager.get_source_catalog_lines(limit=15)
@@ -1109,18 +1138,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
             form = ActionForm(
                 title="丧尸病毒感染",
                 content=body,
-                buttons=[Button("刷新"), Button("关闭")],
-                on_submit=lambda s, idx: self._on_infection_panel_submit(s, idx),
                 on_close=lambda s: None,
             )
+            form.add_button("刷新", on_click=self._show_infection_panel)
+            form.add_button("返回", on_click=self._show_ars_home_panel)
             player.send_form(form)
         except Exception as e:
             self._safe_log('error', f"[ARS] show infection panel error: {e}")
             player.send_message(f"[ARS] 无法打开感染面板: {e}")
-
-    def _on_infection_panel_submit(self, player, index: int) -> None:
-        if index == 0:
-            self._show_infection_panel(player)
     
     # 数据库（仅生存）
 

@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.22-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.23-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -157,11 +157,11 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 
 | 命令 | 权限 | 描述 |
 |------|------|------|
-| `/ars` | `arc_realistic_survival.command.config` | 打开配置面板 |
-| `/ars reload` | `arc_realistic_survival.command.config` | 重载配置 |
-| `/ars nutrition` | 无 | 打开营养学面板（查看四条营养值与食物表） |
+| `/ars` | 全员（common） | 打开个人状态（口渴/营养/感染）；**仅 OP** 可见「配置管理」 |
+| `/ars reload` | OP（config） | 重载配置 |
+| `/ars nutrition` | 全员 | 打开营养学面板（查看四条营养值与食物表） |
 | `/ars nutriset <玩家> <营养素> <0-100>` | OP | 调试：设置玩家指定营养素 |
-| `/ars infection` | 无 | 打开感染面板（感染值与感染源表） |
+| `/ars infection` | 全员 | 打开感染面板（感染值与感染源表） |
 | `/ars infectset <玩家> <0-100>` | OP | 调试：设置玩家感染值 |
 | `/heal <玩家>` | OP/控制台 | 管理用：治愈缺素并将四项营养设为 80（**不影响感染**；物品模组不用） |
 | `/purify <玩家> <数量>` | 自身 / OP | 净化感染：感染值减少指定数量 |
@@ -199,8 +199,8 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 
 ### 权限节点
 
-- `arc_realistic_survival.command.common` - 基础面板（默认：全体）
-- `arc_realistic_survival.command.config` - 配置 / reload / 调试 set（默认：OP）
+- `arc_realistic_survival.command.common` - `/ars` 个人状态等（默认：全体，对齐弧光核心）
+- `arc_realistic_survival.command.config` - reload / 调试 set；配置管理按钮仅 `is_op` 显示（默认：OP）
 - `arc_realistic_survival.command.admin` - `/heal` 及对任意玩家使用对接指令（默认：OP）
 - `arc_realistic_survival.command.item` - 对自身使用对接指令（默认：全体）
 
@@ -289,6 +289,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.23
+- `/ars` 对齐弧光核心：全员打开个人状态；仅 OP 显示「配置管理」按钮
 
 ### v0.3.22
 - 口渴移速范围改为 **45%～115%**（口渴 0→因子 0.45，100→因子 1.15；配置 `thirst_speed_at_zero=-0.55` / `thirst_speed_at_full=0.15`）
