@@ -115,8 +115,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
             # 如果logger未初始化，使用print
             print(f"[{level.upper()}] {message}")
 
-    def _log_consume_always(self, message: str) -> None:
-        """进食/饮水诊断：同时写入插件 logger 与 stdout，避免后台级别过滤导致看不见。"""
+    def _log_consume_debug(self, message: str) -> None:
+        """进食/饮水诊断日志：仅 thirst_consume_debug=true 时输出。"""
+        if not self.thirst_consume_debug:
+            return
         self._safe_log('info', message)
         try:
             print(f"[ARCRealisticSurvival][consume] {message}", flush=True)
@@ -187,7 +189,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.register_events(self)
         self._safe_log(
             'info',
-            "[ARCRealisticSurvival] 事件已注册（含 PlayerItemConsumeEvent），进食/饮水时控制台会输出 [consume] 行",
+        self._safe_log(
+            'info',
+            "[ARCRealisticSurvival] 事件已注册（含 PlayerItemConsumeEvent）；"
+            "进食诊断日志默认关闭，设 thirst_consume_debug=true 后开启",
         )
 
         # 初始化经济插件 - 检查 arc_core 优先，然后 umoney
@@ -1532,7 +1537,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 return
             item = event.item
             if item is None:
-                self._log_consume_always(
+                self._log_consume_debug(
                     f"player={player.name} item=None，跳过（事件未携带物品栈）",
                 )
                 return
@@ -1552,7 +1557,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             thirst_handled = False
             if cfg is not None:
                 delta = int(cfg.get("delta", 0))
-                self._log_consume_always(
+                self._log_consume_debug(
                     f"player={player.name} hand={hand!r} identities={identity_list!r} "
                     f"→ 命中 key={lookup_key!r} thirst_delta={delta}",
                 )
@@ -1565,7 +1570,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 nutrition_handled = self.nutrition_manager.on_player_consume(player, item)
 
             if not thirst_handled and not nutrition_handled:
-                self._log_consume_always(
+                self._log_consume_debug(
                     f"player={player.name} hand={hand!r} identities={identity_list!r} "
                     f"→ 未匹配 thirst_items / nutrition_items",
                 )
