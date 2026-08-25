@@ -25,17 +25,28 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
     commands = {
         "ars": {
-            "description": "ARC Realistic Survival config panel (op)",
-            "usages": ["/ars"],
-            "permissions": ["arc_realistic_survival.command.config"],
+            "description": "ARC Realistic Survival：营养/感染面板；OP 可开配置与调试。",
+            "usages": [
+                "/ars",
+                "/ars nutrition",
+                "/ars infection",
+                "/ars reload",
+                "/ars infectset <player: player> <value: float>",
+                "/ars nutriset <player: player> <nutrient: str> <value: int>",
+            ],
+            "permissions": ["arc_realistic_survival.command.common"],
         }
     }
 
     permissions = {
+        "arc_realistic_survival.command.common": {
+            "description": "允许使用 /ars nutrition、/ars infection 等基础指令",
+            "default": True,
+        },
         "arc_realistic_survival.command.config": {
-            "description": "Allow opening survival config panel",
-            "default": False
-        }
+            "description": "允许打开 /ars 配置面板及 reload / nutriset / infectset（OP）",
+            "default": "op",
+        },
     }
 
     def __init__(self):
@@ -317,14 +328,22 @@ class ARCRealisticSurvivalPlugin(Plugin):
                         except Exception as e:
                             sender.send_message(f"[ARS] 设置失败: {e}")
                         return True
-                # 打开配置面板（仅玩家、且需要权限/OP）
+                # 打开配置面板（仅玩家、且需要 config 权限 / OP）
                 if not hasattr(sender, 'send_form'):
                     sender.send_message(self.language_manager.GetText("PLAYER_ONLY_COMMAND") or "Players only")
                     return True
-                if (hasattr(sender, 'has_permission') and sender.has_permission('arc_realistic_survival.command.config')) or getattr(sender, 'is_op', False):
+                has_cfg = False
+                try:
+                    has_cfg = sender.has_permission("arc_realistic_survival.command.config")
+                except Exception:
+                    has_cfg = False
+                if has_cfg or getattr(sender, "is_op", False):
                     self._show_survival_config_panel(sender)
                 else:
-                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                    sender.send_message(
+                        "[ARS] 用法: /ars nutrition | /ars infection\n"
+                        "配置面板需要 OP 权限（/ars）"
+                    )
                 return True
         return True
 

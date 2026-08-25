@@ -240,6 +240,9 @@ python -m build
 
 ## 📝 更新日志
 
+### v0.3.6
+- 修复 `/ars` 权限：`default: False` 改为与弧光核心一致——全员 `common`，配置类 `config` 默认 `op`
+
 ### v0.3.5
 - 兼容 Endstone 0.11.x：药水效果优先用文档中的 `endstone.potion.Effect`，不可用时回退 `/effect` 命令，修复插件无法加载
 
