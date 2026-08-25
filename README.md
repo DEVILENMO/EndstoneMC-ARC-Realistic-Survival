@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.12-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.13-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -160,6 +160,8 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
 | `/ars nutriset <玩家> <营养素> <0-100>` | OP | 调试：设置玩家指定营养素 |
 | `/ars infection` | 无 | 打开感染面板（感染值与感染源表） |
 | `/ars infectset <玩家> <0-100>` | OP | 调试：设置玩家感染值 |
+| `/heal <玩家>` | OP/控制台 | 治愈缺素病症，四项营养设为 80（不影响感染） |
+| `/purify <玩家> <数量>` | OP/控制台 | 净化感染：感染值减少指定数量 |
 
 ### 权限节点
 
@@ -249,6 +251,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.13
+- 新增高级命令（仅 OP/控制台）：`/heal <玩家>` 治愈缺素并将营养设为 80；`/purify <玩家> <数量>` 净化感染值
 
 ### v0.3.12
 - ✅ **弧光核心侧边栏**：注册 `ars_health` 页面，展示口渴、营养四项与严重度、丧尸感染值/状态；数值变化时自动推送（需 arc_core ≥ 0.9.0）

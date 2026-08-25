@@ -425,6 +425,7 @@ class NutritionManager:
             getattr(EffectType, "WEAKNESS", None),
             getattr(EffectType, "POISON", None),
             getattr(EffectType, "MINING_FATIGUE", None),
+            getattr(EffectType, "BLINDNESS", None),
         ):
             if eff is None:
                 continue
@@ -432,6 +433,25 @@ class NutritionManager:
                 remove_mob_effect(player, eff)
             except Exception:
                 pass
+
+    def heal_to(self, player, value: int = 80) -> dict[str, int]:
+        """治愈缺素病症：四项营养设为指定值并清除症状（不影响感染）。"""
+        xuid = self._get_xuid(player)
+        target = self._clamp(int(value))
+        old_severity = dict(self.player_severity.get(xuid, {}))
+        data = {k: target for k in NUTRIENT_KEYS}
+        self.player_nutrition[xuid] = data
+        new_severity = {k: self.get_severity(target) for k in NUTRIENT_KEYS}
+        self.player_severity[xuid] = new_severity
+        self.clear_symptoms(player)
+        self._apply_persistent_symptoms(player)
+        self._notify_severity_changes(player, old_severity, new_severity)
+        self.persist_player(player)
+        try:
+            self.plugin._push_sidebar_for_player(player)
+        except Exception:
+            pass
+        return data
 
     def _apply_persistent_symptoms(self, player) -> None:
         xuid = self._get_xuid(player)

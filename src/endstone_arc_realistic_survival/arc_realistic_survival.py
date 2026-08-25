@@ -35,7 +35,17 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 "/ars nutriset <player: player> <nutrient: str> <value: int>",
             ],
             "permissions": ["arc_realistic_survival.command.common"],
-        }
+        },
+        "heal": {
+            "description": "治愈缺素病症并将营养设为 80（不影响丧尸感染；仅 OP/控制台）",
+            "usages": ["/heal <player: player>"],
+            "permissions": ["arc_realistic_survival.command.admin"],
+        },
+        "purify": {
+            "description": "净化玩家感染值（仅 OP/控制台）",
+            "usages": ["/purify <player: player> <amount: float>"],
+            "permissions": ["arc_realistic_survival.command.admin"],
+        },
     }
 
     permissions = {
@@ -45,6 +55,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
         },
         "arc_realistic_survival.command.config": {
             "description": "允许打开 /ars 配置面板及 reload / nutriset / infectset（OP）",
+            "default": "op",
+        },
+        "arc_realistic_survival.command.admin": {
+            "description": "允许使用 /heal、/purify 高级管理命令（OP/控制台）",
             "default": "op",
         },
     }
@@ -427,8 +441,104 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def _change_player_money(self, player_name: str, amount: int) -> bool:
         return False
 
+    def _is_admin_sender(self, sender) -> bool:
+        """OP 或服务器控制台才可用的高级命令校验。"""
+        if getattr(sender, "is_op", False):
+            return True
+        # 控制台通常不是玩家实体
+        if not hasattr(sender, "game_mode") and not hasattr(sender, "xuid"):
+            return True
+        try:
+            if sender.has_permission("arc_realistic_survival.command.admin"):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _resolve_online_player(self, name: str):
+        try:
+            return self.server.get_player(name)
+        except Exception:
+            return None
+
     def on_command(self, sender: CommandSender, command: Command, args: list[str]) -> bool:
         match command.name:
+            case "heal":
+                if not self._is_admin_sender(sender):
+                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                    return True
+                if len(args) < 1:
+                    sender.send_message("[ARS] 用法: /heal <玩家>")
+                    return True
+                target = self._resolve_online_player(args[0])
+                if target is None:
+                    sender.send_message(f"[ARS] 找不到玩家: {args[0]}")
+                    return True
+                if self.nutrition_manager is None:
+                    sender.send_message("[ARS] 营养系统未初始化")
+                    return True
+                try:
+                    data = self.nutrition_manager.heal_to(target, 80)
+                    # 若处于创造旁观快照，同步写回营养，避免切回生存又变病
+                    xuid = self._get_player_xuid(target)
+                    snap = self._creative_snapshots.get(xuid)
+                    if snap is not None:
+                        snap["nutrition"] = dict(data)
+                    sender.send_message(
+                        f"[ARS] 已治愈 {target.name}：营养已设为 80，缺素病症已清除（感染未改动）"
+                    )
+                    try:
+                        target.send_toast("治疗", "你的身体状况已恢复。")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    sender.send_message(f"[ARS] 治愈失败: {e}")
+                return True
+
+            case "purify":
+                if not self._is_admin_sender(sender):
+                    sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                    return True
+                if len(args) < 2:
+                    sender.send_message("[ARS] 用法: /purify <玩家> <净化量>")
+                    return True
+                target = self._resolve_online_player(args[0])
+                if target is None:
+                    sender.send_message(f"[ARS] 找不到玩家: {args[0]}")
+                    return True
+                try:
+                    amount = float(args[1])
+                except ValueError:
+                    sender.send_message("[ARS] 净化量必须是数字")
+                    return True
+                if amount <= 0:
+                    sender.send_message("[ARS] 净化量必须大于 0")
+                    return True
+                if self.zombie_virus_manager is None:
+                    sender.send_message("[ARS] 感染系统未初始化")
+                    return True
+                try:
+                    xuid = self._get_player_xuid(target)
+                    old = float(self.zombie_virus_manager.player_infection.get(xuid, 0.0))
+                    new_val = self.zombie_virus_manager.apply_delta(
+                        target, -amount, source_label="净化"
+                    )
+                    snap = self._creative_snapshots.get(xuid)
+                    if snap is not None:
+                        snap["infection"] = float(new_val)
+                    removed = max(0.0, old - float(new_val))
+                    sender.send_message(
+                        f"[ARS] 已净化 {target.name} 感染 -{removed:.0f}："
+                        f"{int(old)} → {int(new_val)}"
+                    )
+                    try:
+                        target.send_toast("净化", f"感染值降低了 {int(removed)} 点。")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    sender.send_message(f"[ARS] 净化失败: {e}")
+                return True
+
             case "ars":
                 if args and len(args) >= 1:
                     sub = str(args[0]).lower()
