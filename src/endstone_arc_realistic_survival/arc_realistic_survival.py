@@ -1608,14 +1608,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             except Exception:
                 pass
         effect = resolve_effect_type("instant_damage")
-        applied = apply_mob_effect(player, effect, 1, 255, particles=True, icon=True)
-        if applied:
-            return
-        try:
-            if hasattr(player, "perform_command"):
-                player.perform_command("effect @s instant_damage 1 255")
-        except Exception as e:
-            self._safe_log('error', f"[ARS] dehydration instant_damage error: {e}")
+        apply_mob_effect(player, effect, 1, 255, particles=True, icon=True)
 
     def _sync_dehydration_state(self, player) -> None:
         """口渴 < 0 时记录起始时间；持续超过 thirst_fatal_seconds 则瞬间伤害 255。"""

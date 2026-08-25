@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.23-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.24-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -289,6 +289,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.24
+- 修复进食/饮水刷「命令权限级别错误：effect」：药水效果回退改为控制台 `dispatch_command`，不再让玩家自己执行 `/effect`
 
 ### v0.3.23
 - `/ars` 对齐弧光核心：全员打开个人状态；仅 OP 显示「配置管理」按钮
