@@ -304,56 +304,79 @@ class ZombieVirusManager:
         self._mark_warn(xuid)
 
     def _trigger_zombie_transform(self, player) -> None:
+        """感染满值：先清零落库，再尝试击杀并刷丧尸；清零与是否杀死无关。"""
         xuid = self._get_xuid(player)
         if xuid in self._transforming:
-            return
-        self._transforming.add(xuid)
-        # 先清零并落库，避免杀进程途中异常导致感染值残留
-        self.player_infection[xuid] = 0.0
-        try:
-            self.persist_player(player)
-        except Exception as e:
-            self._log("error", f"[ARS] persist infection before transform error: {e}")
-        try:
-            loc = player.location
-            dimension = getattr(loc, "dimension", None)
-            spawn_type = random.choice(self.infection_zombie_entities)
-
-            try:
-                player.send_toast("丧尸化", "感染失控！你变成了丧尸…")
-            except Exception:
-                try:
-                    player.send_message("[感染] 感染失控！你变成了丧尸…")
-                except Exception:
-                    pass
-
-            try:
-                player.health = 0
-            except Exception as e:
-                self._log("error", f"[ARS] kill infected player error: {e}")
-
-            def spawn_zombie():
-                try:
-                    target_dim = dimension
-                    if target_dim is None:
-                        level = self.plugin.server.level
-                        if level is not None:
-                            target_dim = level.get_dimension("overworld")
-                    if target_dim is not None:
-                        target_dim.spawn_actor(loc, spawn_type)
-                except Exception as e:
-                    self._log("error", f"[ARS] spawn zombie after transform error: {e}")
-                finally:
-                    self._transforming.discard(xuid)
-
-            self.plugin.server.scheduler.run_task(self.plugin, spawn_zombie, 5)
-        except Exception as e:
-            self._log("error", f"[ARS] zombie transform error: {e}")
+            # 仍强制清零，防止残留
             self.player_infection[xuid] = 0.0
             try:
                 self.persist_player(player)
             except Exception:
                 pass
+            return
+        self._transforming.add(xuid)
+
+        # 1) 无条件清零并落库（最稳妥，不管后面杀没杀掉）
+        self.player_infection[xuid] = 0.0
+        try:
+            self.persist_player(player)
+        except Exception as e:
+            self._log("error", f"[ARS] persist infection clear on transform error: {e}")
+
+        loc = None
+        dimension = None
+        spawn_type = random.choice(self.infection_zombie_entities)
+        try:
+            loc = player.location
+            dimension = getattr(loc, "dimension", None)
+        except Exception as e:
+            self._log("error", f"[ARS] read location on transform error: {e}")
+
+        try:
+            player.send_toast("丧尸化", "感染失控！你变成了丧尸…")
+        except Exception:
+            try:
+                player.send_message("[感染] 感染失控！你变成了丧尸…")
+            except Exception:
+                pass
+
+        # 2) 尽力击杀；失败不影响已清零的感染值
+        try:
+            player.health = 0
+        except Exception as e:
+            self._log("error", f"[ARS] kill via health=0 error: {e}")
+            try:
+                if hasattr(player, "perform_command"):
+                    player.perform_command("kill @s")
+            except Exception as e2:
+                self._log("error", f"[ARS] kill via command error: {e2}")
+
+        def spawn_zombie():
+            try:
+                if loc is None:
+                    return
+                target_dim = dimension
+                if target_dim is None:
+                    level = self.plugin.server.level
+                    if level is not None:
+                        target_dim = level.get_dimension("overworld")
+                if target_dim is not None:
+                    target_dim.spawn_actor(loc, spawn_type)
+            except Exception as e:
+                self._log("error", f"[ARS] spawn zombie after transform error: {e}")
+            finally:
+                self._transforming.discard(xuid)
+                # 再保险清一次
+                self.player_infection[xuid] = 0.0
+                try:
+                    self.persist_player(player)
+                except Exception:
+                    pass
+
+        try:
+            self.plugin.server.scheduler.run_task(self.plugin, spawn_zombie, 5)
+        except Exception as e:
+            self._log("error", f"[ARS] schedule spawn zombie error: {e}")
             self._transforming.discard(xuid)
 
     def reset_on_death(self, player) -> None:
