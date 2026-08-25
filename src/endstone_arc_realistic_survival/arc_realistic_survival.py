@@ -1266,15 +1266,18 @@ class ARCRealisticSurvivalPlugin(Plugin):
         """
         相对叠加移速：walk_speed = walk_speed / 旧因子 * 新因子。
         本会话首次写入时按原版基速绝对值设置，避免上次残留 walk_speed 被再次乘除变成乌龟速。
+        改 walk_speed 会打断疾跑，故改前记录 is_sprinting，改后恢复。
         """
         try:
             if not hasattr(player, "walk_speed"):
                 return
             xuid = self._get_player_xuid(player)
             new_factor = max(float(self.SPEED_FACTOR_MIN), float(new_factor))
+            was_sprinting = self._read_is_sprinting(player)
             if xuid not in self.player_xuid_to_speed_factor:
                 player.walk_speed = max(0.01, float(self.VANILLA_WALK_SPEED) * new_factor)
                 self.player_xuid_to_speed_factor[xuid] = new_factor
+                self._restore_sprint_after_speed_change(player, was_sprinting)
                 return
             old_factor = float(self.player_xuid_to_speed_factor.get(xuid, self.SPEED_FACTOR_NEUTRAL))
             if old_factor <= 0:
@@ -1285,8 +1288,47 @@ class ARCRealisticSurvivalPlugin(Plugin):
             current = float(player.walk_speed)
             player.walk_speed = max(0.01, current / old_factor * new_factor)
             self.player_xuid_to_speed_factor[xuid] = new_factor
+            self._restore_sprint_after_speed_change(player, was_sprinting)
         except Exception as e:
             self._safe_log('error', f"[ARS] set speed factor error: {e}")
+
+    def _read_is_sprinting(self, player) -> bool:
+        try:
+            return bool(getattr(player, "is_sprinting", False))
+        except Exception:
+            return False
+
+    def _restore_sprint_after_speed_change(self, player, was_sprinting: bool) -> None:
+        """改 walk_speed 后恢复疾跑；同 tick + 下一 tick 各写一次，避免客户端被拉回走路。"""
+        if not was_sprinting or not hasattr(player, "is_sprinting"):
+            return
+        try:
+            player.is_sprinting = True
+        except Exception:
+            return
+        try:
+            self.server.scheduler.run_task(
+                self, lambda p=player: self._delayed_restore_sprint(p), delay=1
+            )
+        except Exception:
+            pass
+
+    def _delayed_restore_sprint(self, player) -> None:
+        try:
+            if player is None:
+                return
+            name = getattr(player, "name", None)
+            if not name:
+                return
+            try:
+                if self.server.get_player(name) is None:
+                    return
+            except Exception:
+                pass
+            if hasattr(player, "is_sprinting"):
+                player.is_sprinting = True
+        except Exception:
+            pass
 
     def _apply_thirst_movement_modifier(self, player) -> None:
         """按基速倍率与当前口渴重算因子，相对应用到 walk_speed。"""
