@@ -77,11 +77,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
-        # 口渴 0→因子 0.25，100→因子 2.25；再乘基速倍率（默认 1.5 = 原版 0.10 加快 50%）
+        # 口渴 0→因子 0.25，100→因子 2.25；再乘基速倍率（默认 1.0 = 原版 walk_speed 0.10）
         self.thirst_speed_at_zero = -0.75
         self.thirst_speed_at_full = 1.25
         self.thirst_fatal_seconds = 3600
-        self.walk_speed_base_multiplier = 1.5
+        self.walk_speed_base_multiplier = 1.0
         self.player_xuid_to_dehydrated_since = {}
         # 本插件已施加的移速调整因子（默认 1.0 = 未调整）
         self.player_xuid_to_speed_factor = {}
@@ -692,7 +692,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             try:
                 for p in self.server.online_players:
                     if self._is_survival_like(p):
-                        self._apply_thirst_movement_modifier(p)
+                        self._reset_walk_speed_baseline(p)
                     self._push_sidebar_for_player(p)
             except Exception:
                 pass
@@ -989,8 +989,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
             val = self.setting_manager.GetSetting("walk_speed_base_multiplier")
             if val is None or val == "":
-                self.setting_manager.SetSetting("walk_speed_base_multiplier", "1.5")
-                self.walk_speed_base_multiplier = 1.5
+                self.setting_manager.SetSetting("walk_speed_base_multiplier", "1.0")
+                self.walk_speed_base_multiplier = 1.0
             else:
                 self.walk_speed_base_multiplier = max(0.1, float(val))
         except Exception as e:
@@ -1018,18 +1018,20 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def _set_speed_factor(self, player, new_factor: float) -> None:
         """
         相对叠加移速：walk_speed = walk_speed / 旧因子 * 新因子。
-        不覆盖其他插件对 walk_speed 的修改，只替换本插件自己的那一份。
+        本会话首次写入时按原版基速绝对值设置，避免上次残留 walk_speed 被再次乘除变成乌龟速。
         """
         try:
             if not hasattr(player, "walk_speed"):
                 return
             xuid = self._get_player_xuid(player)
-            old_factor = float(
-                self.player_xuid_to_speed_factor.get(xuid, self.SPEED_FACTOR_NEUTRAL)
-            )
+            new_factor = max(float(self.SPEED_FACTOR_MIN), float(new_factor))
+            if xuid not in self.player_xuid_to_speed_factor:
+                player.walk_speed = max(0.01, float(self.VANILLA_WALK_SPEED) * new_factor)
+                self.player_xuid_to_speed_factor[xuid] = new_factor
+                return
+            old_factor = float(self.player_xuid_to_speed_factor.get(xuid, self.SPEED_FACTOR_NEUTRAL))
             if old_factor <= 0:
                 old_factor = float(self.SPEED_FACTOR_NEUTRAL)
-            new_factor = max(float(self.SPEED_FACTOR_MIN), float(new_factor))
             if abs(new_factor - old_factor) < 1e-9:
                 self.player_xuid_to_speed_factor[xuid] = new_factor
                 return
@@ -1047,6 +1049,15 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._set_speed_factor(player, self._combined_speed_factor(thirst))
         except Exception as e:
             self._safe_log('error', f"[ARS] thirst walk_speed error: {e}")
+
+    def _reset_walk_speed_baseline(self, player) -> None:
+        """强制按原版基速重算本插件因子（修复异常乌龟速）。"""
+        try:
+            xuid = self._get_player_xuid(player)
+            self.player_xuid_to_speed_factor.pop(xuid, None)
+            self._apply_thirst_movement_modifier(player)
+        except Exception as e:
+            self._safe_log('error', f"[ARS] reset walk_speed baseline error: {e}")
 
     def _clear_thirst_movement_modifier(self, player) -> None:
         """移除本插件移速调整（因子回到 1.0），保留其他插件的改动。"""
@@ -1433,7 +1444,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.on_player_join(player)
         if self._is_survival_like(player):
-            self._apply_thirst_movement_modifier(player)
+            # 进服强制按原版基速重算，避免上次残留 walk_speed 叠乘成乌龟
+            self._reset_walk_speed_baseline(player)
             self._sync_dehydration_state(player)
         else:
             self._enter_non_survival_mode(player)
