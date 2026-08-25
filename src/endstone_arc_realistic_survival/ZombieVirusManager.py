@@ -308,18 +308,24 @@ class ZombieVirusManager:
         if xuid in self._transforming:
             return
         self._transforming.add(xuid)
+        # 先清零并落库，避免杀进程途中异常导致感染值残留
+        self.player_infection[xuid] = 0.0
+        try:
+            self.persist_player(player)
+        except Exception as e:
+            self._log("error", f"[ARS] persist infection before transform error: {e}")
         try:
             loc = player.location
             dimension = getattr(loc, "dimension", None)
             spawn_type = random.choice(self.infection_zombie_entities)
 
-            self.player_infection[xuid] = 0.0
-            self.persist_player(player)
-
             try:
                 player.send_toast("丧尸化", "感染失控！你变成了丧尸…")
             except Exception:
-                player.send_message("[感染] 感染失控！你变成了丧尸…")
+                try:
+                    player.send_message("[感染] 感染失控！你变成了丧尸…")
+                except Exception:
+                    pass
 
             try:
                 player.health = 0
@@ -343,13 +349,22 @@ class ZombieVirusManager:
             self.plugin.server.scheduler.run_task(self.plugin, spawn_zombie, 5)
         except Exception as e:
             self._log("error", f"[ARS] zombie transform error: {e}")
+            self.player_infection[xuid] = 0.0
+            try:
+                self.persist_player(player)
+            except Exception:
+                pass
             self._transforming.discard(xuid)
 
     def reset_on_death(self, player) -> None:
         """死亡时清零感染（口渴由主插件重置，营养不重置）。"""
-        if hasattr(player, "game_mode"):
-            if player.game_mode != GameMode.SURVIVAL and player.game_mode != GameMode.ADVENTURE:
-                return
+        xuid = self._get_xuid(player)
+        self._transforming.discard(xuid)
+        self.player_infection[xuid] = 0.0
+        self.persist_player(player)
+
+    def reset_on_respawn(self, player) -> None:
+        """重生时再强制清零并落库，防止死亡事件未触发或写库失败导致感染残留。"""
         xuid = self._get_xuid(player)
         self._transforming.discard(xuid)
         self.player_infection[xuid] = 0.0

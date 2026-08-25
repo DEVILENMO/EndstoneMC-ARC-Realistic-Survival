@@ -5,7 +5,6 @@ import math
 import time
 
 from endstone import GameMode
-from endstone.attribute import Attribute, AttributeModifier
 from endstone.command import Command, CommandSender
 from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent, PlayerGameModeChangeEvent
 from endstone.plugin import Plugin
@@ -64,12 +63,12 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
-        # 口渴 0→-75% 移速，100→+125% 移速（MULTIPLY_BASE 线性映射）
+        # 口渴 0→-75% 移速，100→+125% 移速；通过 Player.walk_speed 写入（默认 0.10）
         self.thirst_speed_at_zero = -0.75
         self.thirst_speed_at_full = 1.25
         self.thirst_fatal_seconds = 3600
         self.player_xuid_to_dehydrated_since = {}
-        self.THIRST_SPEED_MODIFIER = "ars:thirst_speed"
+        self.DEFAULT_WALK_SPEED = 0.10
         # 创造/旁观时冻结真实生存数值；切回生存时恢复
         self._creative_snapshots = {}
         self.nutrition_manager = None
@@ -662,45 +661,27 @@ class ARCRealisticSurvivalPlugin(Plugin):
             float(self.thirst_speed_at_full) - float(self.thirst_speed_at_zero)
         )
 
+    def _thirst_walk_speed(self, thirst: int) -> float:
+        """绝对 walk_speed：默认 0.10 × (1 + 线性加成)。"""
+        mul = 1.0 + self._thirst_speed_amount(thirst)
+        return max(0.01, float(self.DEFAULT_WALK_SPEED) * mul)
+
     def _apply_thirst_movement_modifier(self, player) -> None:
+        """用 Endstone Player.walk_speed 写入移速（见官方文档）。"""
         try:
-            get_attr = getattr(player, "get_attribute", None)
-            if get_attr is None:
+            if not hasattr(player, "walk_speed"):
                 return
             xuid = self._get_player_xuid(player)
             thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
-            inst = get_attr(Attribute.MOVEMENT_SPEED)
-            if inst is None:
-                return
-            self._clear_thirst_movement_modifier(player)
-            amount = self._thirst_speed_amount(thirst)
-            mod = AttributeModifier(
-                self.THIRST_SPEED_MODIFIER,
-                amount,
-                AttributeModifier.MULTIPLY_BASE,
-            )
-            if hasattr(inst, "add_transient_modifier"):
-                inst.add_transient_modifier(mod)
-            else:
-                inst.add_modifier(mod)
+            player.walk_speed = self._thirst_walk_speed(thirst)
         except Exception as e:
-            self._safe_log('error', f"[ARS] thirst movement modifier error: {e}")
+            self._safe_log('error', f"[ARS] thirst walk_speed error: {e}")
 
     def _clear_thirst_movement_modifier(self, player) -> None:
+        """恢复默认 walk_speed=0.10。"""
         try:
-            get_attr = getattr(player, "get_attribute", None)
-            if get_attr is None:
-                return
-            inst = get_attr(Attribute.MOVEMENT_SPEED)
-            if inst is None:
-                return
-            try:
-                inst.remove_modifier(self.THIRST_SPEED_MODIFIER)
-            except Exception:
-                for existing in list(getattr(inst, "modifiers", []) or []):
-                    if getattr(existing, "name", None) == self.THIRST_SPEED_MODIFIER:
-                        inst.remove_modifier(existing)
-                        break
+            if hasattr(player, "walk_speed"):
+                player.walk_speed = float(self.DEFAULT_WALK_SPEED)
         except Exception:
             pass
 
@@ -1111,16 +1092,19 @@ class ARCRealisticSurvivalPlugin(Plugin):
     @event_handler()
     def on_player_death(self, event: PlayerDeathEvent):
         player = event.player
+        # 感染：任意死亡都清零（含丧尸化自杀），不依赖生存模式判断
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.reset_on_death(player)
         if not self._is_survival_like(player):
             return
         self._reset_player_thirst(player)
-        if self.zombie_virus_manager is not None:
-            self.zombie_virus_manager.reset_on_death(player)
 
     @event_handler()
     def on_player_respawn(self, event: PlayerRespawnEvent):
         player = event.player
         if self._is_survival_like(player):
+            if self.zombie_virus_manager is not None:
+                self.zombie_virus_manager.reset_on_respawn(player)
             self._apply_thirst_movement_modifier(player)
             if self.nutrition_manager is not None:
                 self.nutrition_manager.on_player_respawn(player)
