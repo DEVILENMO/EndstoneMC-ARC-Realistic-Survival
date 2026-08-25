@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.16-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.17-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -11,7 +11,7 @@
 - **动态口渴值**：玩家口渴值以 100 为上限，可因持续缺水掉到 0 以下
 - **自动衰减**：口渴值会随时间自动降低
 - **移动加速消耗**：玩家移动时口渴值消耗速度会增加
-- **移速联动**：口渴 0→100 映射移速因子 **0.25 → 2.25**（相对叠加到当前 `walk_speed`，可与其他移速插件共存）
+- **移速联动**：口渴 0→100 映射移速因子 **0.25 → 2.25**，再乘基速倍率（默认 **1.5**，相对原版 0.10 加快 50%）；相对叠加到当前 `walk_speed`，可与其他移速插件共存
 - **严重脱水**：口渴低于 0 后开始计时，持续满 1 小时给予 `instant_damage` 255 秒杀
 - **创造/旁观旁路**：切到创造或旁观时口渴/营养/感染显示为正常值并停止变动；切回生存/冒险时恢复原先数值
 - **数据持久化**：玩家口渴值会自动保存到数据库
@@ -89,9 +89,10 @@ thirst_tick_seconds: 10          # 口渴值衰减间隔（秒）
 thirst_decay_per_tick: 1         # 每次衰减的口渴值
 thirst_moving_multiplier: 2.0    # 移动时的衰减倍率
 thirst_initial: 100              # 玩家初始口渴值
-thirst_speed_at_zero: -0.75      # 口渴=0 时移速倍率（-75%）
-thirst_speed_at_full: 1.25       # 口渴=100 时移速倍率（+125%）
+thirst_speed_at_zero: -0.75      # 口渴=0 时相对加成
+thirst_speed_at_full: 1.25       # 口渴=100 时相对加成
 thirst_fatal_seconds: 3600       # 口渴<0 持续该秒数后瞬间伤害秒杀
+walk_speed_base_multiplier: 1.5  # 基速倍率（相对原版 0.10；1.5=加快50%）
 nutrition_tick_seconds: 300      # 营养衰减间隔（秒）
 nutrition_decay_per_tick: 1      # 每次衰减的营养值
 nutrition_initial: 100           # 玩家初始营养值
@@ -175,7 +176,7 @@ ENERGY_DRINK|40|STRENGTH|60        # 能量饮料增加40口渴值并给予60秒
    - 静止状态：每 10 秒（默认）减少 1 点口渴值
    - 移动状态：衰减速度翻倍
    - 口渴可低于 0（上限仍为 100）
-   - 移速按 0–100 线性映射为因子 0.25–2.25，用 `当前 walk_speed / 旧因子 × 新因子` 相对叠加
+   - 移速 = 基速倍率（默认 1.5）× 口渴因子（0.25–2.25），相对叠加到 `walk_speed`
    - 口渴低于 0 持续满 1 小时：`instant_damage` 255
 
 2. **补充口渴值**：
@@ -253,6 +254,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.17
+- 移速基速加快 50%：新增 `walk_speed_base_multiplier`（默认 1.5，相对原版 walk_speed 0.10）
 
 ### v0.3.16
 - 侧边栏重点色改为 §6 橙金，与弧光核心灰橙配色一致

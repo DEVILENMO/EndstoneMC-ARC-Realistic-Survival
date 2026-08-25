@@ -77,15 +77,17 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
-        # 口渴 0→因子 0.25，100→因子 2.25；相对叠加到当前 walk_speed，兼容其他移速插件
+        # 口渴 0→因子 0.25，100→因子 2.25；再乘基速倍率（默认 1.5 = 原版 0.10 加快 50%）
         self.thirst_speed_at_zero = -0.75
         self.thirst_speed_at_full = 1.25
         self.thirst_fatal_seconds = 3600
+        self.walk_speed_base_multiplier = 1.5
         self.player_xuid_to_dehydrated_since = {}
         # 本插件已施加的移速调整因子（默认 1.0 = 未调整）
         self.player_xuid_to_speed_factor = {}
         self.SPEED_FACTOR_NEUTRAL = 1.0
         self.SPEED_FACTOR_MIN = 0.01
+        self.VANILLA_WALK_SPEED = 0.10
         # 创造/旁观时冻结真实生存数值；切回生存时恢复
         self._creative_snapshots = {}
         self.nutrition_manager = None
@@ -689,6 +691,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._register_sidebar_page()
             try:
                 for p in self.server.online_players:
+                    if self._is_survival_like(p):
+                        self._apply_thirst_movement_modifier(p)
                     self._push_sidebar_for_player(p)
             except Exception:
                 pass
@@ -982,6 +986,13 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.thirst_fatal_seconds = 3600
             else:
                 self.thirst_fatal_seconds = max(1, int(float(val)))
+
+            val = self.setting_manager.GetSetting("walk_speed_base_multiplier")
+            if val is None or val == "":
+                self.setting_manager.SetSetting("walk_speed_base_multiplier", "1.5")
+                self.walk_speed_base_multiplier = 1.5
+            else:
+                self.walk_speed_base_multiplier = max(0.1, float(val))
         except Exception as e:
             self._safe_log('error', f"[ARCRealisticSurvival] load thirst settings error: {e}")
 
@@ -995,9 +1006,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
         )
 
     def _thirst_speed_factor(self, thirst: int) -> float:
-        """口渴对应的移速调整因子：1.0 + 线性加成；0→0.25，100→2.25。"""
+        """口渴对应的相对因子：1.0 + 线性加成；0→0.25，100→2.25。"""
         factor = 1.0 + self._thirst_speed_amount(thirst)
         return max(float(self.SPEED_FACTOR_MIN), float(factor))
+
+    def _combined_speed_factor(self, thirst: int) -> float:
+        """最终施加因子 = 基速倍率 × 口渴因子（相对原版 0.10）。"""
+        combined = float(self.walk_speed_base_multiplier) * self._thirst_speed_factor(thirst)
+        return max(float(self.SPEED_FACTOR_MIN), combined)
 
     def _set_speed_factor(self, player, new_factor: float) -> None:
         """
@@ -1024,11 +1040,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._safe_log('error', f"[ARS] set speed factor error: {e}")
 
     def _apply_thirst_movement_modifier(self, player) -> None:
-        """按当前口渴重算本插件移速因子并相对应用到 walk_speed。"""
+        """按基速倍率与当前口渴重算因子，相对应用到 walk_speed。"""
         try:
             xuid = self._get_player_xuid(player)
             thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
-            self._set_speed_factor(player, self._thirst_speed_factor(thirst))
+            self._set_speed_factor(player, self._combined_speed_factor(thirst))
         except Exception as e:
             self._safe_log('error', f"[ARS] thirst walk_speed error: {e}")
 
