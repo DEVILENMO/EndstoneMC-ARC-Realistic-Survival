@@ -189,8 +189,6 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.register_events(self)
         self._safe_log(
             'info',
-        self._safe_log(
-            'info',
             "[ARCRealisticSurvival] 事件已注册（含 PlayerItemConsumeEvent）；"
             "进食诊断日志默认关闭，设 thirst_consume_debug=true 后开启",
         )
