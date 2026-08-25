@@ -7,6 +7,10 @@ THIRST_VALUE=当前口渴值: {value}
 THIRST_DECREASED=你的口渴值减少了 {amount}
 THIRST_INCREASED=你的口渴值增加了 {amount}
 THIRST_LOW_WARNING=你的口渴值过低，请尽快补充水分！
+THIRST_DEHYDRATED_TITLE=严重脱水
+THIRST_DEHYDRATED_WARNING=口渴值已耗尽，超过一小时将致命！
+THIRST_DEHYDRATED_DEATH_TITLE=严重脱水
+THIRST_DEHYDRATED_DEATH=你因严重脱水而死。
 THIRST_EFFECT_APPLIED=获得效果: {effect} 持续 {seconds} 秒
 
 # 配置面板

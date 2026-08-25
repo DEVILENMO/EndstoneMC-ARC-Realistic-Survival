@@ -2,6 +2,7 @@ import datetime
 import os
 import json
 import math
+import time
 
 from endstone import GameMode
 from endstone.attribute import Attribute, AttributeModifier
@@ -63,10 +64,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
-        self.thirst_hydrated_threshold = 70
-        self.thirst_dehydrated_threshold = 30
-        self.thirst_speed_boost = 0.2
-        self.thirst_speed_penalty = 0.2
+        # 口渴 0→-75% 移速，100→+125% 移速（MULTIPLY_BASE 线性映射）
+        self.thirst_speed_at_zero = -0.75
+        self.thirst_speed_at_full = 1.25
+        self.thirst_fatal_seconds = 3600
+        self.player_xuid_to_dehydrated_since = {}
         self.THIRST_SPEED_MODIFIER = "ars:thirst_speed"
         # 创造/旁观时冻结真实生存数值；切回生存时恢复
         self._creative_snapshots = {}
@@ -576,6 +578,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._safe_log('info', "[ARCRealisticSurvival] player_thirst table ready")
         else:
             self._safe_log('error', "[ARCRealisticSurvival] Failed to create player_thirst table")
+        if not self.db_manager.ensure_column("player_thirst", "dehydrated_since", "REAL"):
+            self._safe_log('warning', "[ARCRealisticSurvival] failed to add player_thirst.dehydrated_since")
 
         thirst_items_fields = {
             "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
@@ -626,27 +630,37 @@ class ARCRealisticSurvivalPlugin(Plugin):
             else:
                 self.thirst_consume_debug = str(val).strip().lower() in ("1", "true", "yes", "on")
 
-            for key, default in (
-                ("thirst_hydrated_threshold", "70"),
-                ("thirst_dehydrated_threshold", "30"),
-            ):
-                val = self.setting_manager.GetSetting(key)
-                if val is None or val == "":
-                    self.setting_manager.SetSetting(key, default)
-                    val = default
-                setattr(self, key, int(val))
+            val = self.setting_manager.GetSetting("thirst_speed_at_zero")
+            if val is None or val == "":
+                self.setting_manager.SetSetting("thirst_speed_at_zero", "-0.75")
+                self.thirst_speed_at_zero = -0.75
+            else:
+                self.thirst_speed_at_zero = float(val)
 
-            for key, default in (
-                ("thirst_speed_boost", "0.2"),
-                ("thirst_speed_penalty", "0.2"),
-            ):
-                val = self.setting_manager.GetSetting(key)
-                if val is None or val == "":
-                    self.setting_manager.SetSetting(key, default)
-                    val = default
-                setattr(self, key, float(val))
+            val = self.setting_manager.GetSetting("thirst_speed_at_full")
+            if val is None or val == "":
+                self.setting_manager.SetSetting("thirst_speed_at_full", "1.25")
+                self.thirst_speed_at_full = 1.25
+            else:
+                self.thirst_speed_at_full = float(val)
+
+            val = self.setting_manager.GetSetting("thirst_fatal_seconds")
+            if val is None or val == "":
+                self.setting_manager.SetSetting("thirst_fatal_seconds", "3600")
+                self.thirst_fatal_seconds = 3600
+            else:
+                self.thirst_fatal_seconds = max(1, int(float(val)))
         except Exception as e:
             self._safe_log('error', f"[ARCRealisticSurvival] load thirst settings error: {e}")
+
+    def _thirst_speed_amount(self, thirst: int) -> float:
+        """口渴 0→thirst_speed_at_zero，100→thirst_speed_at_full，线性映射；低于 0 按 0 算。"""
+        span = float(self.thirst_max - self.thirst_min) or 100.0
+        t = max(self.thirst_min, min(self.thirst_max, int(thirst)))
+        ratio = (t - self.thirst_min) / span
+        return float(self.thirst_speed_at_zero) + ratio * (
+            float(self.thirst_speed_at_full) - float(self.thirst_speed_at_zero)
+        )
 
     def _apply_thirst_movement_modifier(self, player) -> None:
         try:
@@ -659,26 +673,16 @@ class ARCRealisticSurvivalPlugin(Plugin):
             if inst is None:
                 return
             self._clear_thirst_movement_modifier(player)
-            if thirst >= self.thirst_hydrated_threshold:
-                mod = AttributeModifier(
-                    self.THIRST_SPEED_MODIFIER,
-                    self.thirst_speed_boost,
-                    AttributeModifier.MULTIPLY_BASE,
-                )
-                if hasattr(inst, "add_transient_modifier"):
-                    inst.add_transient_modifier(mod)
-                else:
-                    inst.add_modifier(mod)
-            elif thirst <= self.thirst_dehydrated_threshold:
-                mod = AttributeModifier(
-                    self.THIRST_SPEED_MODIFIER,
-                    -self.thirst_speed_penalty,
-                    AttributeModifier.MULTIPLY_BASE,
-                )
-                if hasattr(inst, "add_transient_modifier"):
-                    inst.add_transient_modifier(mod)
-                else:
-                    inst.add_modifier(mod)
+            amount = self._thirst_speed_amount(thirst)
+            mod = AttributeModifier(
+                self.THIRST_SPEED_MODIFIER,
+                amount,
+                AttributeModifier.MULTIPLY_BASE,
+            )
+            if hasattr(inst, "add_transient_modifier"):
+                inst.add_transient_modifier(mod)
+            else:
+                inst.add_modifier(mod)
         except Exception as e:
             self._safe_log('error', f"[ARS] thirst movement modifier error: {e}")
 
@@ -808,6 +812,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         if xuid not in self._creative_snapshots:
             snap = {
                 "thirst": int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial)),
+                "dehydrated_since": self.player_xuid_to_dehydrated_since.get(xuid),
                 "nutrition": None,
                 "infection": None,
             }
@@ -823,6 +828,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._creative_snapshots[xuid] = snap
 
         self.player_xuid_to_thirst[xuid] = self.thirst_initial
+        self.player_xuid_to_dehydrated_since[xuid] = None
         self._clear_thirst_movement_modifier(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.apply_healthy_bypass(player)
@@ -835,6 +841,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         snap = self._creative_snapshots.pop(xuid, None)
         if snap is not None:
             self.player_xuid_to_thirst[xuid] = int(snap.get("thirst", self.thirst_initial))
+            self.player_xuid_to_dehydrated_since[xuid] = snap.get("dehydrated_since")
             if self.nutrition_manager is not None and snap.get("nutrition") is not None:
                 self.nutrition_manager.restore_nutrition(player, snap["nutrition"])
             elif self.nutrition_manager is not None:
@@ -845,6 +852,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             if self.nutrition_manager is not None:
                 self.nutrition_manager._apply_persistent_symptoms(player)
         self._apply_thirst_movement_modifier(player)
+        self._sync_dehydration_state(player)
         self._persist_player_thirst(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.persist_player(player)
@@ -858,6 +866,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         if snap is None:
             return
         self.player_xuid_to_thirst[xuid] = int(snap.get("thirst", self.thirst_initial))
+        self.player_xuid_to_dehydrated_since[xuid] = snap.get("dehydrated_since")
         if self.nutrition_manager is not None and snap.get("nutrition") is not None:
             x = self._get_player_xuid(player)
             data = {k: int(snap["nutrition"].get(k, self.nutrition_manager.nutrition_initial)) for k in NUTRIENT_KEYS}
@@ -866,7 +875,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self.zombie_virus_manager.player_infection[xuid] = float(snap["infection"])
 
     def _clamp_thirst(self, value: int) -> int:
-        return max(self.thirst_min, min(self.thirst_max, value))
+        """上限 100；允许低于 0，以便记录严重脱水持续时间。"""
+        return min(self.thirst_max, int(value))
 
     def _get_player_xuid(self, player) -> str:
         try:
@@ -874,30 +884,49 @@ class ARCRealisticSurvivalPlugin(Plugin):
         except Exception:
             return player.name
 
+    def _parse_dehydrated_since(self, raw) -> float | None:
+        if raw is None or raw == "":
+            return None
+        try:
+            return float(raw)
+        except Exception:
+            return None
+
     def _load_player_thirst(self, player) -> int:
         xuid = self._get_player_xuid(player)
-        row = self.db_manager.query_one("SELECT thirst FROM player_thirst WHERE xuid=?", (xuid,))
+        row = self.db_manager.query_one(
+            "SELECT thirst, dehydrated_since FROM player_thirst WHERE xuid=?",
+            (xuid,),
+        )
+        if row is None:
+            row = self.db_manager.query_one("SELECT thirst FROM player_thirst WHERE xuid=?", (xuid,))
         if row is None:
             self.player_xuid_to_thirst[xuid] = self.thirst_initial
-            # 插入一条
+            self.player_xuid_to_dehydrated_since[xuid] = None
             self.db_manager.insert("player_thirst", {
                 "xuid": xuid,
                 "player_name": player.name,
                 "thirst": self.thirst_initial,
+                "dehydrated_since": None,
                 "updated_at": datetime.datetime.utcnow().isoformat()
             })
         else:
             self.player_xuid_to_thirst[xuid] = int(row["thirst"])
+            self.player_xuid_to_dehydrated_since[xuid] = self._parse_dehydrated_since(
+                row.get("dehydrated_since")
+            )
         return self.player_xuid_to_thirst[xuid]
 
     def _persist_player_thirst(self, player) -> None:
         try:
             xuid = self._get_player_xuid(player)
             thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
+            since = self.player_xuid_to_dehydrated_since.get(xuid)
             exists = self.db_manager.query_one("SELECT xuid FROM player_thirst WHERE xuid=?", (xuid,))
             data = {
                 "player_name": player.name,
                 "thirst": thirst,
+                "dehydrated_since": float(since) if since is not None else None,
                 "updated_at": datetime.datetime.utcnow().isoformat()
             }
             if exists is None:
@@ -920,7 +949,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         if new_val != current:
             msg = self.language_manager.GetText("THIRST_VALUE") or "当前口渴值: {value}"
             player.send_popup(msg.replace("{value}", str(new_val)))
-            self._apply_thirst_movement_modifier(player)
+        self._apply_thirst_movement_modifier(player)
+        self._sync_dehydration_state(player)
         return new_val
 
     def _reset_player_thirst(self, player) -> None:
@@ -928,8 +958,65 @@ class ARCRealisticSurvivalPlugin(Plugin):
             return
         xuid = self._get_player_xuid(player)
         self.player_xuid_to_thirst[xuid] = self.thirst_initial
+        self.player_xuid_to_dehydrated_since[xuid] = None
         self._persist_player_thirst(player)
         self._apply_thirst_movement_modifier(player)
+
+    def _notify_dehydrated(self, player) -> None:
+        title = self.language_manager.GetText("THIRST_DEHYDRATED_TITLE") or "严重脱水"
+        content = (
+            self.language_manager.GetText("THIRST_DEHYDRATED_WARNING")
+            or "口渴值已耗尽，超过一小时将致命！"
+        )
+        try:
+            player.send_toast(title, content)
+        except Exception:
+            try:
+                player.send_message(f"[{title}] {content}")
+            except Exception:
+                pass
+
+    def _kill_from_dehydration(self, player) -> None:
+        title = self.language_manager.GetText("THIRST_DEHYDRATED_DEATH_TITLE") or "严重脱水"
+        content = self.language_manager.GetText("THIRST_DEHYDRATED_DEATH") or "你因严重脱水而死。"
+        try:
+            player.send_toast(title, content)
+        except Exception:
+            try:
+                player.send_message(f"[{title}] {content}")
+            except Exception:
+                pass
+        effect = resolve_effect_type("instant_damage")
+        applied = apply_mob_effect(player, effect, 1, 255, particles=True, icon=True)
+        if applied:
+            return
+        try:
+            if hasattr(player, "perform_command"):
+                player.perform_command("effect @s instant_damage 1 255")
+        except Exception as e:
+            self._safe_log('error', f"[ARS] dehydration instant_damage error: {e}")
+
+    def _sync_dehydration_state(self, player) -> None:
+        """口渴 < 0 时记录起始时间；持续超过 thirst_fatal_seconds 则瞬间伤害 255。"""
+        if not self._is_survival_like(player):
+            return
+        xuid = self._get_player_xuid(player)
+        thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
+        if thirst < 0:
+            started = self.player_xuid_to_dehydrated_since.get(xuid)
+            if started is None:
+                self.player_xuid_to_dehydrated_since[xuid] = time.time()
+                self._notify_dehydrated(player)
+                return
+            try:
+                elapsed = time.time() - float(started)
+            except Exception:
+                self.player_xuid_to_dehydrated_since[xuid] = time.time()
+                return
+            if elapsed >= float(self.thirst_fatal_seconds):
+                self._kill_from_dehydration(player)
+        elif self.player_xuid_to_dehydrated_since.get(xuid) is not None:
+            self.player_xuid_to_dehydrated_since[xuid] = None
 
     def _start_thirst_timer(self) -> None:
         try:
@@ -952,6 +1039,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
                         decay = base_decay if not moving_flag else int(math.ceil(base_decay * self.thirst_moving_multiplier))
                         if decay > 0:
                             self._apply_thirst_delta(player, -decay, reason="timer")
+                        else:
+                            self._sync_dehydration_state(player)
+                        # 口渴未变时也重挂移速，避免 transient modifier 丢失后「0 口渴仍健步如飞」
+                        self._apply_thirst_movement_modifier(player)
                         # 每次循环后重置移动标记
                         if hasattr(player, '_arc_moving_flag'):
                             try:
@@ -980,6 +1071,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self.zombie_virus_manager.on_player_join(player)
         if self._is_survival_like(player):
             self._apply_thirst_movement_modifier(player)
+            self._sync_dehydration_state(player)
         else:
             self._enter_non_survival_mode(player)
 
@@ -1005,6 +1097,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self._leave_non_survival_mode(player)
             else:
                 self._apply_thirst_movement_modifier(player)
+                self._sync_dehydration_state(player)
                 if self.nutrition_manager is not None:
                     self.nutrition_manager._apply_persistent_symptoms(player)
         else:

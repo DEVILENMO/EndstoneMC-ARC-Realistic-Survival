@@ -7,6 +7,10 @@ THIRST_VALUE=Current Thirst: {value}
 THIRST_DECREASED=Your thirst decreased by {amount}
 THIRST_INCREASED=Your thirst increased by {amount}
 THIRST_LOW_WARNING=Your thirst is low. Drink something!
+THIRST_DEHYDRATED_TITLE=Severe Dehydration
+THIRST_DEHYDRATED_WARNING=Thirst is depleted. You will die if you don't drink within one hour!
+THIRST_DEHYDRATED_DEATH_TITLE=Severe Dehydration
+THIRST_DEHYDRATED_DEATH=You died of severe dehydration.
 THIRST_EFFECT_APPLIED=Effect applied: {effect} for {seconds} seconds
 
 # Tips/Errors (samples)

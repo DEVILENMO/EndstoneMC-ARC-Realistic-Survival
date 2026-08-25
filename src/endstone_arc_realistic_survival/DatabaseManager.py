@@ -138,3 +138,10 @@ class DatabaseManager:
         """
         sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
         return self.query_one(sql, (table,)) is not None
+
+    def ensure_column(self, table: str, column: str, definition: str) -> bool:
+        """表已存在时补列；列已在则视为成功。"""
+        rows = self.query_all(f"PRAGMA table_info({table})")
+        if any(str(r.get("name") or "") == column for r in rows):
+            return True
+        return self.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
