@@ -136,7 +136,7 @@ class NutritionManager:
             if val is None or val == "":
                 self.setting_manager.SetSetting(key, default)
                 val = default
-            parsed = int(val)
+            parsed = int(float(str(val).strip()))
             if minimum is not None:
                 return max(minimum, parsed)
             return parsed

@@ -1177,34 +1177,46 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._safe_log('info', "[ARCRealisticSurvival] thirst_items table ready")
 
     def _load_thirst_settings(self) -> None:
+        def _as_int(raw, default: int) -> int:
+            try:
+                return int(float(str(raw).strip()))
+            except Exception:
+                return int(default)
+
+        def _as_float(raw, default: float) -> float:
+            try:
+                return float(str(raw).strip())
+            except Exception:
+                return float(default)
+
         try:
             val = self.setting_manager.GetSetting("thirst_tick_seconds")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_tick_seconds", "10")
                 self.thirst_tick_seconds = 10
             else:
-                self.thirst_tick_seconds = max(1, int(val))
+                self.thirst_tick_seconds = max(1, _as_int(val, 10))
 
             val = self.setting_manager.GetSetting("thirst_decay_per_tick")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_decay_per_tick", "1")
                 self.thirst_decay_per_tick = 1
             else:
-                self.thirst_decay_per_tick = max(0, int(val))
+                self.thirst_decay_per_tick = max(0, _as_int(val, 1))
 
             val = self.setting_manager.GetSetting("thirst_moving_multiplier")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_moving_multiplier", "2.0")
                 self.thirst_moving_multiplier = 2.0
             else:
-                self.thirst_moving_multiplier = max(1.0, float(val))
+                self.thirst_moving_multiplier = max(1.0, _as_float(val, 2.0))
 
             val = self.setting_manager.GetSetting("thirst_initial")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_initial", "100")
                 self.thirst_initial = 100
             else:
-                self.thirst_initial = int(val)
+                self.thirst_initial = _as_int(val, 100)
 
             val = self.setting_manager.GetSetting("thirst_consume_debug")
             if val is None or val == "":
@@ -1218,28 +1230,28 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.setting_manager.SetSetting("thirst_speed_at_zero", "-0.55")
                 self.thirst_speed_at_zero = -0.55
             else:
-                self.thirst_speed_at_zero = float(val)
+                self.thirst_speed_at_zero = _as_float(val, -0.55)
 
             val = self.setting_manager.GetSetting("thirst_speed_at_full")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_speed_at_full", "0.15")
                 self.thirst_speed_at_full = 0.15
             else:
-                self.thirst_speed_at_full = float(val)
+                self.thirst_speed_at_full = _as_float(val, 0.15)
 
             val = self.setting_manager.GetSetting("thirst_fatal_seconds")
             if val is None or val == "":
                 self.setting_manager.SetSetting("thirst_fatal_seconds", "3600")
                 self.thirst_fatal_seconds = 3600
             else:
-                self.thirst_fatal_seconds = max(1, int(float(val)))
+                self.thirst_fatal_seconds = max(1, _as_int(val, 3600))
 
             val = self.setting_manager.GetSetting("walk_speed_base_multiplier")
             if val is None or val == "":
                 self.setting_manager.SetSetting("walk_speed_base_multiplier", "1.0")
                 self.walk_speed_base_multiplier = 1.0
             else:
-                self.walk_speed_base_multiplier = max(0.1, float(val))
+                self.walk_speed_base_multiplier = max(0.1, _as_float(val, 1.0))
         except Exception as e:
             self._safe_log('error', f"[ARCRealisticSurvival] load thirst settings error: {e}")
 

@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.25-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.26-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -289,6 +289,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.26
+- 修复载入配置时 `thirst_initial=100.0` 等浮点字符串导致 `int()` 报错；整数配置统一 `int(float(...))` 解析
 
 ### v0.3.25
 - 口渴改 `walk_speed` 时保留疾跑：改前记录 `is_sprinting`，改后同 tick 与下一 tick 写回，避免掉口渴时被拉回走路速度
