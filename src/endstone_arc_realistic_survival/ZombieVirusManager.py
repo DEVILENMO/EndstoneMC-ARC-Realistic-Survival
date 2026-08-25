@@ -347,10 +347,23 @@ class ZombieVirusManager:
 
     def reset_on_death(self, player) -> None:
         """死亡时清零感染（口渴由主插件重置，营养不重置）。"""
+        if hasattr(player, "game_mode"):
+            if player.game_mode != GameMode.SURVIVAL and player.game_mode != GameMode.ADVENTURE:
+                return
         xuid = self._get_xuid(player)
         self._transforming.discard(xuid)
         self.player_infection[xuid] = 0.0
         self.persist_player(player)
+
+    def apply_healthy_bypass(self, player) -> None:
+        """创造/旁观：感染显示为 0，不写库。"""
+        xuid = self._get_xuid(player)
+        self.player_infection[xuid] = 0.0
+
+    def restore_infection(self, player, value: float) -> None:
+        """从快照恢复真实感染值。"""
+        xuid = self._get_xuid(player)
+        self.player_infection[xuid] = self._clamp(float(value))
 
     def on_player_join(self, player) -> None:
         self.load_player(player)

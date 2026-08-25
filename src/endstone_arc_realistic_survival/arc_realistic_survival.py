@@ -6,7 +6,7 @@ import math
 from endstone import GameMode
 from endstone.attribute import Attribute, AttributeModifier
 from endstone.command import Command, CommandSender
-from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent
+from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent, PlayerGameModeChangeEvent
 from endstone.plugin import Plugin
 from endstone.form import ActionForm, Button, ModalForm, Label, TextInput
 from endstone.potion import Effect, EffectType
@@ -57,6 +57,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_speed_boost = 0.2
         self.thirst_speed_penalty = 0.2
         self.THIRST_SPEED_MODIFIER = "ars:thirst_speed"
+        # 创造/旁观时冻结真实生存数值；切回生存时恢复
+        self._creative_snapshots = {}
         self.nutrition_manager = None
         self.zombie_virus_manager = None
     
@@ -757,6 +759,75 @@ class ARCRealisticSurvivalPlugin(Plugin):
         )
 
     # 生存-口渴系统：内部工具
+    def _is_survival_like(self, player) -> bool:
+        try:
+            return player.game_mode == GameMode.SURVIVAL or player.game_mode == GameMode.ADVENTURE
+        except Exception:
+            return True
+
+    def _enter_non_survival_mode(self, player) -> None:
+        """创造/旁观：快照真实数值 → 运行时设为正常值 → 停止后续变动处理。"""
+        xuid = self._get_player_xuid(player)
+        if xuid not in self._creative_snapshots:
+            snap = {
+                "thirst": int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial)),
+                "nutrition": None,
+                "infection": None,
+            }
+            if self.nutrition_manager is not None:
+                nm = self.nutrition_manager
+                snap["nutrition"] = dict(
+                    nm.player_nutrition.get(xuid) or nm._default_nutrition()
+                )
+            if self.zombie_virus_manager is not None:
+                snap["infection"] = float(
+                    self.zombie_virus_manager.player_infection.get(xuid, 0.0)
+                )
+            self._creative_snapshots[xuid] = snap
+
+        self.player_xuid_to_thirst[xuid] = self.thirst_initial
+        self._clear_thirst_movement_modifier(player)
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.apply_healthy_bypass(player)
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.apply_healthy_bypass(player)
+
+    def _leave_non_survival_mode(self, player) -> None:
+        """切回生存/冒险：从快照恢复真实数值并重新挂效果。"""
+        xuid = self._get_player_xuid(player)
+        snap = self._creative_snapshots.pop(xuid, None)
+        if snap is not None:
+            self.player_xuid_to_thirst[xuid] = int(snap.get("thirst", self.thirst_initial))
+            if self.nutrition_manager is not None and snap.get("nutrition") is not None:
+                self.nutrition_manager.restore_nutrition(player, snap["nutrition"])
+            elif self.nutrition_manager is not None:
+                self.nutrition_manager._apply_persistent_symptoms(player)
+            if self.zombie_virus_manager is not None and snap.get("infection") is not None:
+                self.zombie_virus_manager.restore_infection(player, snap["infection"])
+        else:
+            if self.nutrition_manager is not None:
+                self.nutrition_manager._apply_persistent_symptoms(player)
+        self._apply_thirst_movement_modifier(player)
+        self._persist_player_thirst(player)
+        if self.nutrition_manager is not None:
+            self.nutrition_manager.persist_player(player)
+        if self.zombie_virus_manager is not None:
+            self.zombie_virus_manager.persist_player(player)
+
+    def _restore_snapshot_before_persist(self, player) -> None:
+        """退出时若仍在创造旁观，把快照写回内存再落库，避免把「正常值」存进数据库。"""
+        xuid = self._get_player_xuid(player)
+        snap = self._creative_snapshots.pop(xuid, None)
+        if snap is None:
+            return
+        self.player_xuid_to_thirst[xuid] = int(snap.get("thirst", self.thirst_initial))
+        if self.nutrition_manager is not None and snap.get("nutrition") is not None:
+            x = self._get_player_xuid(player)
+            data = {k: int(snap["nutrition"].get(k, self.nutrition_manager.nutrition_initial)) for k in NUTRIENT_KEYS}
+            self.nutrition_manager.player_nutrition[x] = data
+        if self.zombie_virus_manager is not None and snap.get("infection") is not None:
+            self.zombie_virus_manager.player_infection[xuid] = float(snap["infection"])
+
     def _clamp_thirst(self, value: int) -> int:
         return max(self.thirst_min, min(self.thirst_max, value))
 
@@ -802,6 +873,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self._safe_log('error', f"[ARCRealisticSurvival] persist thirst error: {e}")
 
     def _apply_thirst_delta(self, player, delta: int, reason: str = "") -> int:
+        if not self._is_survival_like(player):
+            return int(self.player_xuid_to_thirst.get(self._get_player_xuid(player), self.thirst_initial))
         xuid = self._get_player_xuid(player)
         current = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
         new_val = self._clamp_thirst(current + delta)
@@ -814,6 +887,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         return new_val
 
     def _reset_player_thirst(self, player) -> None:
+        if not self._is_survival_like(player):
+            return
         xuid = self._get_player_xuid(player)
         self.player_xuid_to_thirst[xuid] = self.thirst_initial
         self._persist_player_thirst(player)
@@ -862,21 +937,41 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_player_join(self, event: PlayerJoinEvent):
         player = event.player
         self._load_player_thirst(player)
-        self._apply_thirst_movement_modifier(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_join(player)
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.on_player_join(player)
+        if self._is_survival_like(player):
+            self._apply_thirst_movement_modifier(player)
+        else:
+            self._enter_non_survival_mode(player)
 
     @event_handler()
     def on_player_quit(self, event: PlayerQuitEvent):
         player = event.player
+        self._restore_snapshot_before_persist(player)
         self._persist_player_thirst(player)
         self._clear_thirst_movement_modifier(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_quit(player)
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.on_player_quit(player)
+
+    @event_handler()
+    def on_player_game_mode_change(self, event: PlayerGameModeChangeEvent):
+        player = event.player
+        new_mode = event.new_game_mode
+        now_survival = new_mode == GameMode.SURVIVAL or new_mode == GameMode.ADVENTURE
+        xuid = self._get_player_xuid(player)
+        if now_survival:
+            if xuid in self._creative_snapshots:
+                self._leave_non_survival_mode(player)
+            else:
+                self._apply_thirst_movement_modifier(player)
+                if self.nutrition_manager is not None:
+                    self.nutrition_manager._apply_persistent_symptoms(player)
+        else:
+            self._enter_non_survival_mode(player)
 
     @event_handler()
     def on_actor_damage(self, event: ActorDamageEvent):
@@ -886,6 +981,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
     @event_handler()
     def on_player_death(self, event: PlayerDeathEvent):
         player = event.player
+        if not self._is_survival_like(player):
+            return
         self._reset_player_thirst(player)
         if self.zombie_virus_manager is not None:
             self.zombie_virus_manager.reset_on_death(player)
@@ -893,14 +990,19 @@ class ARCRealisticSurvivalPlugin(Plugin):
     @event_handler()
     def on_player_respawn(self, event: PlayerRespawnEvent):
         player = event.player
-        self._apply_thirst_movement_modifier(player)
-        if self.nutrition_manager is not None:
-            self.nutrition_manager.on_player_respawn(player)
+        if self._is_survival_like(player):
+            self._apply_thirst_movement_modifier(player)
+            if self.nutrition_manager is not None:
+                self.nutrition_manager.on_player_respawn(player)
+        else:
+            self._enter_non_survival_mode(player)
 
     @event_handler()
     def on_player_move(self, event: PlayerMoveEvent):
         try:
             player = event.player
+            if not self._is_survival_like(player):
+                return
             setattr(player, '_arc_moving_flag', True)
         except Exception:
             pass
@@ -909,6 +1011,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
     def on_player_item_consume(self, event: PlayerItemConsumeEvent):
         try:
             player = event.player
+            if not self._is_survival_like(player):
+                return
             item = event.item
             if item is None:
                 self._log_consume_always(

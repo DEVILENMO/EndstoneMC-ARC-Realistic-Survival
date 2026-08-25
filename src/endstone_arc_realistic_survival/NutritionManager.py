@@ -511,8 +511,27 @@ class NutritionManager:
 
         self._apply_persistent_symptoms(player)
 
+    def apply_healthy_bypass(self, player) -> None:
+        """创造/旁观：内存设为满营养并清症状，不写库。"""
+        xuid = self._get_xuid(player)
+        data = self._default_nutrition()
+        self.player_nutrition[xuid] = data
+        self.player_severity[xuid] = {k: "healthy" for k in NUTRIENT_KEYS}
+        self.clear_symptoms(player)
+
+    def restore_nutrition(self, player, data: dict[str, int]) -> None:
+        """从快照恢复真实营养并重新挂症状。"""
+        xuid = self._get_xuid(player)
+        restored = {k: self._clamp(int(data.get(k, self.nutrition_initial))) for k in NUTRIENT_KEYS}
+        self.player_nutrition[xuid] = restored
+        self.player_severity[xuid] = {k: self.get_severity(restored[k]) for k in NUTRIENT_KEYS}
+        self._apply_persistent_symptoms(player)
+
     def on_player_join(self, player) -> None:
         self.load_player(player)
+        if player.game_mode != GameMode.SURVIVAL and player.game_mode != GameMode.ADVENTURE:
+            # 真实值由主插件快照；此处先挂症状再由主插件切到 bypass
+            pass
 
     def on_player_quit(self, player) -> None:
         self.clear_symptoms(player)
@@ -523,6 +542,9 @@ class NutritionManager:
 
     def on_player_respawn(self, player) -> None:
         """重生后按数据库中的营养值重新挂症状（死亡不清营养）。"""
+        if player.game_mode != GameMode.SURVIVAL and player.game_mode != GameMode.ADVENTURE:
+            self.apply_healthy_bypass(player)
+            return
         xuid = self._get_xuid(player)
         if xuid not in self.player_nutrition:
             self.load_player(player)
@@ -530,6 +552,8 @@ class NutritionManager:
             self._apply_persistent_symptoms(player)
 
     def on_player_consume(self, player, item) -> bool:
+        if player.game_mode != GameMode.SURVIVAL and player.game_mode != GameMode.ADVENTURE:
+            return False
         cfg, _, lookup_key = self.find_cfg_for_item(item)
         if cfg is None:
             return False
