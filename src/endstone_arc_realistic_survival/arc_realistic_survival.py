@@ -97,9 +97,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
-        # 口渴 0→因子 0.25，100→因子 2.25；再乘基速倍率（默认 1.0 = 原版 walk_speed 0.10）
-        self.thirst_speed_at_zero = -0.75
-        self.thirst_speed_at_full = 1.25
+        # 口渴 0→因子 0.45（45%），100→因子 1.15（115%）；再乘基速倍率（默认 1.0 = 原版 walk_speed 0.10）
+        self.thirst_speed_at_zero = -0.55
+        self.thirst_speed_at_full = 0.15
         self.thirst_fatal_seconds = 3600
         self.walk_speed_base_multiplier = 1.0
         self.player_xuid_to_dehydrated_since = {}
@@ -1190,15 +1190,15 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
             val = self.setting_manager.GetSetting("thirst_speed_at_zero")
             if val is None or val == "":
-                self.setting_manager.SetSetting("thirst_speed_at_zero", "-0.75")
-                self.thirst_speed_at_zero = -0.75
+                self.setting_manager.SetSetting("thirst_speed_at_zero", "-0.55")
+                self.thirst_speed_at_zero = -0.55
             else:
                 self.thirst_speed_at_zero = float(val)
 
             val = self.setting_manager.GetSetting("thirst_speed_at_full")
             if val is None or val == "":
-                self.setting_manager.SetSetting("thirst_speed_at_full", "1.25")
-                self.thirst_speed_at_full = 1.25
+                self.setting_manager.SetSetting("thirst_speed_at_full", "0.15")
+                self.thirst_speed_at_full = 0.15
             else:
                 self.thirst_speed_at_full = float(val)
 
@@ -1228,7 +1228,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         )
 
     def _thirst_speed_factor(self, thirst: int) -> float:
-        """口渴对应的相对因子：1.0 + 线性加成；0→0.25，100→2.25。"""
+        """口渴对应的相对因子：1.0 + 线性加成；0→0.45（45%），100→1.15（115%）。"""
         factor = 1.0 + self._thirst_speed_amount(thirst)
         return max(float(self.SPEED_FACTOR_MIN), float(factor))
 
