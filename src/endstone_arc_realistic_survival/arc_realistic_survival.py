@@ -9,13 +9,13 @@ from endstone.command import Command, CommandSender
 from endstone.event import event_handler, PlayerItemConsumeEvent, PlayerMoveEvent, PlayerJoinEvent, PlayerQuitEvent, ActorDamageEvent, PlayerDeathEvent, PlayerRespawnEvent, PlayerGameModeChangeEvent
 from endstone.plugin import Plugin
 from endstone.form import ActionForm, Button, ModalForm, Label, TextInput
-from endstone.potion import Effect, EffectType
 
 from .DatabaseManager import DatabaseManager
 from .LanguageManager import LanguageManager
 from .NutritionManager import NUTRIENT_KEYS, NutritionManager
 from .SettingManager import SettingManager
 from .ZombieVirusManager import ZombieVirusManager
+from .effect_compat import apply_mob_effect, resolve_effect_type
 
 
 class ARCRealisticSurvivalPlugin(Plugin):
@@ -631,35 +631,53 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
     def _apply_thirst_movement_modifier(self, player) -> None:
         try:
+            get_attr = getattr(player, "get_attribute", None)
+            if get_attr is None:
+                return
             xuid = self._get_player_xuid(player)
             thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
-            inst = player.get_attribute(Attribute.MOVEMENT_SPEED)
+            inst = get_attr(Attribute.MOVEMENT_SPEED)
             if inst is None:
                 return
-            try:
-                inst.remove_modifier(self.THIRST_SPEED_MODIFIER)
-            except Exception:
-                pass
+            self._clear_thirst_movement_modifier(player)
             if thirst >= self.thirst_hydrated_threshold:
-                inst.add_transient_modifier(AttributeModifier(
+                mod = AttributeModifier(
                     self.THIRST_SPEED_MODIFIER,
                     self.thirst_speed_boost,
                     AttributeModifier.MULTIPLY_BASE,
-                ))
+                )
+                if hasattr(inst, "add_transient_modifier"):
+                    inst.add_transient_modifier(mod)
+                else:
+                    inst.add_modifier(mod)
             elif thirst <= self.thirst_dehydrated_threshold:
-                inst.add_transient_modifier(AttributeModifier(
+                mod = AttributeModifier(
                     self.THIRST_SPEED_MODIFIER,
                     -self.thirst_speed_penalty,
                     AttributeModifier.MULTIPLY_BASE,
-                ))
+                )
+                if hasattr(inst, "add_transient_modifier"):
+                    inst.add_transient_modifier(mod)
+                else:
+                    inst.add_modifier(mod)
         except Exception as e:
             self._safe_log('error', f"[ARS] thirst movement modifier error: {e}")
 
     def _clear_thirst_movement_modifier(self, player) -> None:
         try:
-            inst = player.get_attribute(Attribute.MOVEMENT_SPEED)
-            if inst is not None:
+            get_attr = getattr(player, "get_attribute", None)
+            if get_attr is None:
+                return
+            inst = get_attr(Attribute.MOVEMENT_SPEED)
+            if inst is None:
+                return
+            try:
                 inst.remove_modifier(self.THIRST_SPEED_MODIFIER)
+            except Exception:
+                for existing in list(getattr(inst, "modifiers", []) or []):
+                    if getattr(existing, "name", None) == self.THIRST_SPEED_MODIFIER:
+                        inst.remove_modifier(existing)
+                        break
         except Exception:
             pass
 
@@ -1074,9 +1092,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
             except Exception:
                 amplifier = 0
             try:
-                effect_type = EffectType.get(str(eff_name).lower())
+                effect_type = resolve_effect_type(str(eff_name))
                 if effect_type is None:
                     continue
-                player.add_effect(Effect(effect_type, duration_sec * 20, amplifier, ambient=True))
+                apply_mob_effect(player, effect_type, duration_sec * 20, amplifier, ambient=True)
             except Exception as e:
                 self._safe_log('error', f"[ARS] apply item buff error: {e}")

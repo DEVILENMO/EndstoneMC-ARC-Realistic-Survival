@@ -240,6 +240,9 @@ python -m build
 
 ## 📝 更新日志
 
+### v0.3.5
+- 兼容 Endstone 0.11.x：药水效果优先用文档中的 `endstone.potion.Effect`，不可用时回退 `/effect` 命令，修复插件无法加载
+
 ### v0.3.4
 - 创造/旁观模式：口渴、营养、感染统一设为正常值并停止变动；仅在 `PlayerGameModeChangeEvent` 时切换状态
 - 切回生存/冒险时从快照恢复真实数值（退出创造不会把「正常值」写入数据库）

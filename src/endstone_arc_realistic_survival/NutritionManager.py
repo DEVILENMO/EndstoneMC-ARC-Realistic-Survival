@@ -5,7 +5,8 @@ from typing import Any, Callable, Optional
 
 from endstone import GameMode
 from endstone.attribute import Attribute, AttributeModifier
-from endstone.potion import Effect, EffectType
+
+from .effect_compat import EffectType, apply_mob_effect, remove_mob_effect
 
 
 NUTRIENT_KEYS = ("vitamin_a", "vitamin_c", "iron", "protein")
@@ -387,24 +388,40 @@ class NutritionManager:
                     return
 
     def _remove_modifier_safe(self, player, modifier_id: str) -> None:
+        get_attr = getattr(player, "get_attribute", None)
+        if get_attr is None:
+            return
         for attr_name in (
             Attribute.HEALTH,
             Attribute.PLAYER_EXHAUSTION,
             Attribute.ATTACK_DAMAGE,
         ):
             try:
-                inst = player.get_attribute(attr_name)
-                if inst is not None:
+                inst = get_attr(attr_name)
+                if inst is None:
+                    continue
+                try:
                     inst.remove_modifier(modifier_id)
+                except Exception:
+                    for existing in list(getattr(inst, "modifiers", []) or []):
+                        if getattr(existing, "name", None) == modifier_id:
+                            inst.remove_modifier(existing)
+                            break
             except Exception:
                 pass
 
     def clear_symptoms(self, player) -> None:
         for mid in MODIFIER_IDS:
             self._remove_modifier_safe(player, mid)
-        for eff in (EffectType.WEAKNESS, EffectType.POISON, EffectType.MINING_FATIGUE):
+        for eff in (
+            getattr(EffectType, "WEAKNESS", None),
+            getattr(EffectType, "POISON", None),
+            getattr(EffectType, "MINING_FATIGUE", None),
+        ):
+            if eff is None:
+                continue
             try:
-                player.remove_effect(eff)
+                remove_mob_effect(player, eff)
             except Exception:
                 pass
 
@@ -434,17 +451,32 @@ class NutritionManager:
             )
             amp = {"mild": 0, "moderate": 0, "severe": 1}[protein_sev]
             try:
-                player.add_effect(Effect(EffectType.MINING_FATIGUE, 220, amp, ambient=True, particles=False, icon=False))
+                apply_mob_effect(
+                    player,
+                    EffectType.MINING_FATIGUE,
+                    220,
+                    amp,
+                    ambient=True,
+                    particles=False,
+                    icon=False,
+                )
             except Exception:
                 pass
 
     def _add_modifier(self, player, attribute, modifier_id: str, amount: float, operation) -> None:
         try:
-            inst = player.get_attribute(attribute)
+            get_attr = getattr(player, "get_attribute", None)
+            if get_attr is None:
+                return
+            inst = get_attr(attribute)
             if inst is None:
                 return
             self._remove_modifier_safe(player, modifier_id)
-            inst.add_transient_modifier(AttributeModifier(modifier_id, amount, operation))
+            mod = AttributeModifier(modifier_id, amount, operation)
+            if hasattr(inst, "add_transient_modifier"):
+                inst.add_transient_modifier(mod)
+            else:
+                inst.add_modifier(mod)
         except Exception as e:
             self._log("error", f"[ARS] add modifier {modifier_id} error: {e}")
 
@@ -472,15 +504,14 @@ class NutritionManager:
             if random.random() < chance:
                 low, high = {"mild": (40, 80), "moderate": (60, 100), "severe": (100, 200)}[va_sev]
                 try:
-                    player.add_effect(
-                        Effect(
-                            EffectType.BLINDNESS,
-                            random.randint(low, high),
-                            0,
-                            ambient=True,
-                            particles=False,
-                            icon=False,
-                        )
+                    apply_mob_effect(
+                        player,
+                        EffectType.BLINDNESS,
+                        random.randint(low, high),
+                        0,
+                        ambient=True,
+                        particles=False,
+                        icon=False,
                     )
                 except Exception:
                     pass
@@ -490,9 +521,14 @@ class NutritionManager:
             chance = {"mild": 0.12, "moderate": 0.22, "severe": 0.35}[vc_sev]
             if random.random() < chance:
                 try:
-                    player.add_effect(
-                        Effect(EffectType.WEAKNESS, 120, {"mild": 0, "moderate": 0, "severe": 1}[vc_sev],
-                               ambient=True, particles=False, icon=True)
+                    apply_mob_effect(
+                        player,
+                        EffectType.WEAKNESS,
+                        120,
+                        {"mild": 0, "moderate": 0, "severe": 1}[vc_sev],
+                        ambient=True,
+                        particles=False,
+                        icon=True,
                     )
                 except Exception:
                     pass
@@ -505,7 +541,15 @@ class NutritionManager:
                         pass
                 if vc_sev == "severe" and random.random() < 0.5:
                     try:
-                        player.add_effect(Effect(EffectType.POISON, 60, 0, ambient=True, particles=True, icon=True))
+                        apply_mob_effect(
+                            player,
+                            EffectType.POISON,
+                            60,
+                            0,
+                            ambient=True,
+                            particles=True,
+                            icon=True,
+                        )
                     except Exception:
                         pass
 
