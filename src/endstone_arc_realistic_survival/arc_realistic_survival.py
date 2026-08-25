@@ -275,17 +275,17 @@ class ARCRealisticSurvivalPlugin(Plugin):
         try:
             ok = register(
                 self._sidebar_page_id,
-                "§a真实生存",
+                "§b真实生存",
                 [
-                    "§7§m----------------",
-                    "§b口渴 §f{thirst}§7/100",
-                    "§e维A §f{vitamin_a} §7{sev_a}",
-                    "§e维C §f{vitamin_c} §7{sev_c}",
-                    "§6铁 §f{iron} §7{sev_iron}",
-                    "§6蛋白 §f{protein} §7{sev_protein}",
-                    "§c感染 §f{infection}§7/{infection_max}",
-                    "§7{infection_status}",
-                    "§7§m----------------",
+                    "§8----------",
+                    "§7口渴：§f{thirst}§8/100",
+                    "§7维A：§f{vitamin_a} §8{sev_a}",
+                    "§7维C：§f{vitamin_c} §8{sev_c}",
+                    "§7铁：§f{iron} §8{sev_iron}",
+                    "§7蛋白：§f{protein} §8{sev_protein}",
+                    "§7感染：§f{infection}§8/{infection_max}",
+                    "§7状态：§b{infection_status}",
+                    "§8----------",
                 ],
                 owner="arc_realistic_survival",
                 priority=10,
@@ -319,12 +319,12 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
     def _severity_short_label(self, severity: str) -> str:
         mapping = {
-            "healthy": "§a健",
-            "mild": "§e轻",
-            "moderate": "§6中",
-            "severe": "§c重",
+            "healthy": "健",
+            "mild": "轻",
+            "moderate": "中",
+            "severe": "重",
         }
-        return mapping.get(str(severity or "healthy"), "§7?")
+        return mapping.get(str(severity or "healthy"), "?")
 
     def _build_sidebar_values(self, player) -> dict:
         """汇总口渴 / 营养 / 感染，供侧边栏键值模板使用。"""
@@ -359,9 +359,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
             if infection <= 0:
                 infection_status = "未感染"
             elif infection >= threshold:
-                infection_status = "§c恶化中"
+                infection_status = "恶化中"
             else:
-                infection_status = "§a恢复中"
+                infection_status = "恢复中"
 
         return {
             "thirst": thirst,
