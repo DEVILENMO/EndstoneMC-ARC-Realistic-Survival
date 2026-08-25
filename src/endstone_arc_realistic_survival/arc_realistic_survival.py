@@ -63,12 +63,15 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self.thirst_items_map = {}
         self.thirst_consume_debug = False
         self.thirst_task = None
-        # 口渴 0→-75% 移速，100→+125% 移速；通过 Player.walk_speed 写入（默认 0.10）
+        # 口渴 0→因子 0.25，100→因子 2.25；相对叠加到当前 walk_speed，兼容其他移速插件
         self.thirst_speed_at_zero = -0.75
         self.thirst_speed_at_full = 1.25
         self.thirst_fatal_seconds = 3600
         self.player_xuid_to_dehydrated_since = {}
-        self.DEFAULT_WALK_SPEED = 0.10
+        # 本插件已施加的移速调整因子（默认 1.0 = 未调整）
+        self.player_xuid_to_speed_factor = {}
+        self.SPEED_FACTOR_NEUTRAL = 1.0
+        self.SPEED_FACTOR_MIN = 0.01
         # 创造/旁观时冻结真实生存数值；切回生存时恢复
         self._creative_snapshots = {}
         self.nutrition_manager = None
@@ -661,27 +664,56 @@ class ARCRealisticSurvivalPlugin(Plugin):
             float(self.thirst_speed_at_full) - float(self.thirst_speed_at_zero)
         )
 
-    def _thirst_walk_speed(self, thirst: int) -> float:
-        """绝对 walk_speed：默认 0.10 × (1 + 线性加成)。"""
-        mul = 1.0 + self._thirst_speed_amount(thirst)
-        return max(0.01, float(self.DEFAULT_WALK_SPEED) * mul)
+    def _thirst_speed_factor(self, thirst: int) -> float:
+        """口渴对应的移速调整因子：1.0 + 线性加成；0→0.25，100→2.25。"""
+        factor = 1.0 + self._thirst_speed_amount(thirst)
+        return max(float(self.SPEED_FACTOR_MIN), float(factor))
 
-    def _apply_thirst_movement_modifier(self, player) -> None:
-        """用 Endstone Player.walk_speed 写入移速（见官方文档）。"""
+    def _set_speed_factor(self, player, new_factor: float) -> None:
+        """
+        相对叠加移速：walk_speed = walk_speed / 旧因子 * 新因子。
+        不覆盖其他插件对 walk_speed 的修改，只替换本插件自己的那一份。
+        """
         try:
             if not hasattr(player, "walk_speed"):
                 return
             xuid = self._get_player_xuid(player)
+            old_factor = float(
+                self.player_xuid_to_speed_factor.get(xuid, self.SPEED_FACTOR_NEUTRAL)
+            )
+            if old_factor <= 0:
+                old_factor = float(self.SPEED_FACTOR_NEUTRAL)
+            new_factor = max(float(self.SPEED_FACTOR_MIN), float(new_factor))
+            if abs(new_factor - old_factor) < 1e-9:
+                self.player_xuid_to_speed_factor[xuid] = new_factor
+                return
+            current = float(player.walk_speed)
+            player.walk_speed = max(0.01, current / old_factor * new_factor)
+            self.player_xuid_to_speed_factor[xuid] = new_factor
+        except Exception as e:
+            self._safe_log('error', f"[ARS] set speed factor error: {e}")
+
+    def _apply_thirst_movement_modifier(self, player) -> None:
+        """按当前口渴重算本插件移速因子并相对应用到 walk_speed。"""
+        try:
+            xuid = self._get_player_xuid(player)
             thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
-            player.walk_speed = self._thirst_walk_speed(thirst)
+            self._set_speed_factor(player, self._thirst_speed_factor(thirst))
         except Exception as e:
             self._safe_log('error', f"[ARS] thirst walk_speed error: {e}")
 
     def _clear_thirst_movement_modifier(self, player) -> None:
-        """恢复默认 walk_speed=0.10。"""
+        """移除本插件移速调整（因子回到 1.0），保留其他插件的改动。"""
         try:
-            if hasattr(player, "walk_speed"):
-                player.walk_speed = float(self.DEFAULT_WALK_SPEED)
+            self._set_speed_factor(player, self.SPEED_FACTOR_NEUTRAL)
+        except Exception:
+            pass
+
+    def _forget_speed_factor(self, player) -> None:
+        """玩家退出时丢掉因子记录（退出前应已 clear）。"""
+        try:
+            xuid = self._get_player_xuid(player)
+            self.player_xuid_to_speed_factor.pop(xuid, None)
         except Exception:
             pass
 
@@ -1062,6 +1094,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
         self._restore_snapshot_before_persist(player)
         self._persist_player_thirst(player)
         self._clear_thirst_movement_modifier(player)
+        self._forget_speed_factor(player)
         if self.nutrition_manager is not None:
             self.nutrition_manager.on_player_quit(player)
         if self.zombie_virus_manager is not None:
