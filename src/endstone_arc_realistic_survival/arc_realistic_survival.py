@@ -255,8 +255,15 @@ class ARCRealisticSurvivalPlugin(Plugin):
         except Exception:
             return None
 
+    def _is_infection_enabled(self) -> bool:
+        zvm = self.zombie_virus_manager
+        return bool(zvm is not None and getattr(zvm, "infection_enabled", False))
+
     def _register_sidebar_page(self) -> None:
         """向弧光核心注册真实生存健康侧边栏页面。"""
+        # 先卸再挂，保证 infection_enabled 开关切换后行模板同步更新
+        if self._sidebar_registered:
+            self._unregister_sidebar_page()
         self._sidebar_registered = False
         arc = self._get_arc_core()
         if arc is None:
@@ -273,20 +280,26 @@ class ARCRealisticSurvivalPlugin(Plugin):
             )
             return
         try:
+            lines = [
+                "§8----------",
+                "§7口渴：§f{thirst}§8/100",
+                "§7维A：§f{vitamin_a} §8{sev_a}",
+                "§7维C：§f{vitamin_c} §8{sev_c}",
+                "§7铁：§f{iron} §8{sev_iron}",
+                "§7蛋白：§f{protein} §8{sev_protein}",
+            ]
+            if self._is_infection_enabled():
+                lines.extend(
+                    [
+                        "§7感染：§f{infection}§8/{infection_max}",
+                        "§7状态：§6{infection_status}",
+                    ]
+                )
+            lines.append("§8----------")
             ok = register(
                 self._sidebar_page_id,
-                "§b真实生存",
-                [
-                    "§8----------",
-                    "§7口渴：§f{thirst}§8/100",
-                    "§7维A：§f{vitamin_a} §8{sev_a}",
-                    "§7维C：§f{vitamin_c} §8{sev_c}",
-                    "§7铁：§f{iron} §8{sev_iron}",
-                    "§7蛋白：§f{protein} §8{sev_protein}",
-                    "§7感染：§f{infection}§8/{infection_max}",
-                    "§7状态：§b{infection_status}",
-                    "§8----------",
-                ],
+                "§6真实生存",
+                lines,
                 owner="arc_realistic_survival",
                 priority=10,
                 hide_line_if_missing=True,
@@ -295,7 +308,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
             if self._sidebar_registered:
                 self._safe_log(
                     "info",
-                    "[ARCRealisticSurvival] 已向弧光核心注册侧边栏页面 ars_health",
+                    "[ARCRealisticSurvival] 已向弧光核心注册侧边栏页面 ars_health"
+                    + ("（含感染）" if self._is_infection_enabled() else "（无感染）"),
                 )
             else:
                 self._safe_log(
@@ -351,7 +365,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
         infection = 0
         infection_max = 100
         infection_status = "未感染"
-        if self.zombie_virus_manager is not None:
+        infection_on = self._is_infection_enabled()
+        if infection_on and self.zombie_virus_manager is not None:
             zm = self.zombie_virus_manager
             infection = int(float(zm.player_infection.get(xuid, 0.0)))
             infection_max = int(getattr(zm, "infection_max", 100) or 100)
@@ -363,7 +378,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
             else:
                 infection_status = "恢复中"
 
-        return {
+        values = {
             "thirst": thirst,
             "vitamin_a": vitamin_a,
             "vitamin_c": vitamin_c,
@@ -373,10 +388,13 @@ class ARCRealisticSurvivalPlugin(Plugin):
             "sev_c": sev_c,
             "sev_iron": sev_iron,
             "sev_protein": sev_protein,
-            "infection": infection,
-            "infection_max": infection_max,
-            "infection_status": infection_status,
         }
+        # 关闭感染时不写入相关键，配合 hide_line_if_missing 隐藏侧边栏行
+        if infection_on:
+            values["infection"] = infection
+            values["infection_max"] = infection_max
+            values["infection_status"] = infection_status
+        return values
 
     def _push_sidebar_for_player(self, player) -> None:
         """把当前生存状态推送到弧光核心侧边栏页面。"""
@@ -499,6 +517,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 if not self._is_admin_sender(sender):
                     sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
                     return True
+                if not self._is_infection_enabled():
+                    sender.send_message("[ARS] 感染系统已关闭（infection_enabled=false）")
+                    return True
                 if len(args) < 2:
                     sender.send_message("[ARS] 用法: /purify <玩家> <净化量>")
                     return True
@@ -559,11 +580,17 @@ class ARCRealisticSurvivalPlugin(Plugin):
                         if not hasattr(sender, 'send_form'):
                             sender.send_message(self.language_manager.GetText("PLAYER_ONLY_COMMAND") or "Players only")
                             return True
+                        if not self._is_infection_enabled():
+                            sender.send_message("[ARS] 感染系统已关闭（infection_enabled=false）")
+                            return True
                         self._show_infection_panel(sender)
                         return True
                     if sub == "infectset":
                         if not getattr(sender, 'is_op', False):
                             sender.send_message(self.language_manager.GetText("NO_PERMISSION") or "No permission")
+                            return True
+                        if not self._is_infection_enabled():
+                            sender.send_message("[ARS] 感染系统已关闭（infection_enabled=false）")
                             return True
                         if len(args) < 3:
                             sender.send_message("[ARS] 用法: /ars infectset <玩家> <0-100>")
@@ -658,6 +685,13 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 self.nutrition_manager.start_timer()
             if self.zombie_virus_manager is not None:
                 self.zombie_virus_manager.start_timer()
+            # 感染开关可能变化，重挂侧边栏行模板并刷新在线玩家
+            self._register_sidebar_page()
+            try:
+                for p in self.server.online_players:
+                    self._push_sidebar_for_player(p)
+            except Exception:
+                pass
         except Exception as e:
             self._safe_log('error', f"[ARS] reload settings error: {e}")
 
@@ -711,6 +745,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 placeholder="症状提示冷却（秒）",
                 default_value=str(nm.nutrition_warn_cooldown_seconds if nm else 300)
             )
+            input_infection_enabled = TextInput(
+                label="infection_enabled",
+                placeholder="感染开关 true/false（默认 false）",
+                default_value=("true" if (zvm and zvm.infection_enabled) else "false")
+            )
             input_infection_tick = TextInput(
                 label="infection_tick_seconds",
                 placeholder="感染 tick 间隔（秒）",
@@ -743,10 +782,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     new_n_decay = int(float(data[6]))
                     new_n_initial = int(float(data[7]))
                     new_n_cooldown = int(float(data[8]))
-                    new_i_tick = int(float(data[9]))
-                    new_i_threshold = float(data[10])
-                    new_i_growth = float(data[11])
-                    new_i_decay = float(data[12])
+                    new_i_enabled_raw = str(data[9]).strip().lower()
+                    new_i_tick = int(float(data[10]))
+                    new_i_threshold = float(data[11])
+                    new_i_growth = float(data[12])
+                    new_i_decay = float(data[13])
 
                     if new_tick < 1:
                         raise ValueError("thirst tick seconds < 1")
@@ -764,6 +804,9 @@ class ARCRealisticSurvivalPlugin(Plugin):
                         raise ValueError("nutrition initial out of [0,100]")
                     if new_n_cooldown < 30:
                         raise ValueError("nutrition cooldown < 30")
+                    if new_i_enabled_raw not in ("1", "0", "true", "false", "yes", "no", "on", "off"):
+                        raise ValueError("infection_enabled must be true/false")
+                    new_i_enabled = new_i_enabled_raw in ("1", "true", "yes", "on")
                     if new_i_tick < 6:
                         raise ValueError("infection tick seconds < 6")
                     if new_i_threshold < 1 or new_i_threshold > 99:
@@ -779,6 +822,7 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     self.setting_manager.SetSetting("nutrition_decay_per_tick", str(new_n_decay))
                     self.setting_manager.SetSetting("nutrition_initial", str(new_n_initial))
                     self.setting_manager.SetSetting("nutrition_warn_cooldown_seconds", str(new_n_cooldown))
+                    self.setting_manager.SetSetting("infection_enabled", "true" if new_i_enabled else "false")
                     self.setting_manager.SetSetting("infection_tick_seconds", str(new_i_tick))
                     self.setting_manager.SetSetting("infection_threshold", str(new_i_threshold))
                     self.setting_manager.SetSetting("infection_growth_per_minute", str(new_i_growth))
@@ -794,10 +838,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 controls=[
                     header, input_tick, input_decay, input_move, input_initial,
                     input_nutrition_tick, input_nutrition_decay, input_nutrition_initial, input_nutrition_cooldown,
-                    input_infection_tick, input_infection_threshold, input_infection_growth, input_infection_decay,
+                    input_infection_enabled, input_infection_tick, input_infection_threshold,
+                    input_infection_growth, input_infection_decay,
                 ],
                 on_close=lambda s: None,
-                on_submit=on_submit
+                on_submit=on_submit,
             )
             player.send_form(panel)
         except Exception as e:

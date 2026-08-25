@@ -5,4 +5,5 @@ thirst_initial=100
 thirst_speed_at_zero=-0.75
 thirst_speed_at_full=1.25
 thirst_fatal_seconds=3600
+infection_enabled=false
 

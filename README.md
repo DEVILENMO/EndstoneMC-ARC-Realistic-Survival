@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.14-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.16-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -25,6 +25,7 @@
 - **原生 API**：通过 Endstone `Effect` 与 `AttributeModifier` 实现减益，不污染实体 NBT
 
 ### 🧟 丧尸病毒系统
+- **开关**：`infection_enabled`（默认 `false`）；关闭后不产生感染、不恶化、侧边栏不显示感染行
 - **感染值 0-100**：被配置的生物攻击会增加感染值
 - **可配置感染源**：支持精确实体（如 `minecraft:zombie`）或整命名空间（如 `minecraft:`），单独实体优先于命名空间规则
 - **临界恶化**：默认超过 50 后每分钟 +5，低于 50 每分钟 -2
@@ -32,7 +33,7 @@
 
 ### 📊 弧光核心侧边栏（v0.3.12）
 - 启动时向 `arc_core` 注册专属页面 **`ars_health`（真实生存）**
-- 显示口渴、四种营养素及严重度、感染值与状态（未感染 / 恢复中 / 恶化中）
+- 显示口渴、四种营养素及严重度；**仅在 `infection_enabled=true` 时显示感染行**
 - 数值变化、进服、创造旁路切换时自动推送；需弧光核心 **v0.9.0+**
 - 玩家可用 `/sidebar next` 翻到该页（页面数 ≥ 2 时也会自动轮播）
 
@@ -95,6 +96,7 @@ nutrition_tick_seconds: 300      # 营养衰减间隔（秒）
 nutrition_decay_per_tick: 1      # 每次衰减的营养值
 nutrition_initial: 100           # 玩家初始营养值
 nutrition_warn_cooldown_seconds: 300  # 症状提示冷却（秒）
+infection_enabled: false         # 感染系统开关（默认关；丧尸服请设 true）
 infection_tick_seconds: 12        # 感染 tick 间隔（秒）
 infection_threshold: 50           # 恶化临界值
 infection_growth_per_minute: 5    # 超临界每分钟增长
@@ -251,6 +253,12 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.16
+- 侧边栏重点色改为 §6 橙金，与弧光核心灰橙配色一致
+
+### v0.3.15
+- 感染系统可开关：`infection_enabled` 默认 `false`；关闭后不跑感染逻辑，侧边栏也不显示感染
 
 ### v0.3.14
 - 侧边栏 `ars_health` 配色与文案对齐弧光核心（§8/§7/§f/§b，中文标签冒号格式）

@@ -41,7 +41,7 @@ class ZombieVirusManager:
         self.player_last_warn: dict[str, float] = {}
         self.infection_task = None
 
-        self.infection_enabled = True
+        self.infection_enabled = False
         self.infection_tick_seconds = 12
         self.infection_threshold = 50.0
         self.infection_growth_per_minute = 5.0
@@ -77,7 +77,7 @@ class ZombieVirusManager:
                 return default
             return str(val).strip()
 
-        self.infection_enabled = _get_bool("infection_enabled", "true")
+        self.infection_enabled = _get_bool("infection_enabled", "false")
         self.infection_tick_seconds = int(_get_float("infection_tick_seconds", "12", 6))
         self.infection_threshold = _get_float("infection_threshold", "50")
         self.infection_growth_per_minute = _get_float("infection_growth_per_minute", "5", 0)
@@ -247,6 +247,8 @@ class ZombieVirusManager:
             self._log("error", f"[ARS] persist infection error: {e}")
 
     def set_infection(self, player, value: float) -> float:
+        if not self.infection_enabled:
+            raise RuntimeError("infection system disabled")
         xuid = self._get_xuid(player)
         old = float(self.player_infection.get(xuid, 0.0))
         new_val = self._clamp(float(value))
@@ -263,6 +265,8 @@ class ZombieVirusManager:
         return new_val
 
     def apply_delta(self, player, delta: float, source_label: str = "") -> float:
+        if not self.infection_enabled:
+            return float(self.player_infection.get(self._get_xuid(player), 0.0))
         xuid = self._get_xuid(player)
         old = float(self.player_infection.get(xuid, 0.0))
         new_val = self._clamp(old + float(delta))
@@ -313,6 +317,8 @@ class ZombieVirusManager:
 
     def _trigger_zombie_transform(self, player) -> None:
         """感染满值：先清零落库，再尝试击杀并刷丧尸；清零与是否杀死无关。"""
+        if not self.infection_enabled:
+            return
         xuid = self._get_xuid(player)
         if xuid in self._transforming:
             # 仍强制清零，防止残留
