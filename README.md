@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.17-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.18-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -254,6 +254,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.18
+- 侧边栏营养严重度改为完整文案：健康 / 轻症 / 中症 / 重症
 
 ### v0.3.17
 - 移速基速加快 50%：新增 `walk_speed_base_multiplier`（默认 1.5，相对原版 walk_speed 0.10）

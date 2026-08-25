@@ -335,10 +335,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
 
     def _severity_short_label(self, severity: str) -> str:
         mapping = {
-            "healthy": "健",
-            "mild": "轻",
-            "moderate": "中",
-            "severe": "重",
+            "healthy": "健康",
+            "mild": "轻症",
+            "moderate": "中症",
+            "severe": "重症",
         }
         return mapping.get(str(severity or "healthy"), "?")
 
