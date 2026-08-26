@@ -12,7 +12,7 @@ from endstone.form import ActionForm, ModalForm, Label, TextInput
 
 from .DatabaseManager import DatabaseManager
 from .LanguageManager import LanguageManager
-from .NutritionManager import NUTRIENT_KEYS, NutritionManager
+from .NutritionManager import NUTRIENT_KEYS, NUTRIENT_LABELS, NutritionManager
 from .SettingManager import SettingManager
 from .ZombieVirusManager import ZombieVirusManager
 from .effect_compat import apply_mob_effect, resolve_effect_type
@@ -650,7 +650,11 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 data = self.nutrition_manager.apply_deltas(target, nutri, item_label=label)
                 self.nutrition_manager.persist_player(target)
                 self._sync_creative_snap_nutrition(target, data)
-                bits.extend(f"{k}{v:+d}" for k, v in nutri.items() if v)
+                bits.extend(
+                    f"{NUTRIENT_LABELS.get(k, k)}{v:+d}"
+                    for k, v in nutri.items()
+                    if v
+                )
             except Exception as e:
                 sender.send_message(f"[ARS] 营养调整失败: {e}")
                 return False
@@ -674,7 +678,10 @@ class ARCRealisticSurvivalPlugin(Plugin):
             detail = " ".join(bits) if bits else "无变化"
             sender.send_message(f"[ARS] {label} → {target.name}: {detail}")
         try:
-            target.send_toast(label, " ".join(bits) if bits else "已使用")
+            # 第一行：服用了xxx；第二行：维生素A+30 铁+14 …
+            toast_title = f"服用了{label}"
+            toast_body = " ".join(bits) if bits else "已生效"
+            target.send_toast(toast_title, toast_body)
         except Exception:
             pass
         return True
