@@ -1555,8 +1555,8 @@ class ARCRealisticSurvivalPlugin(Plugin):
             self.zombie_virus_manager.player_infection[xuid] = float(snap["infection"])
 
     def _clamp_thirst(self, value: int) -> int:
-        """上限 100；允许低于 0，以便记录严重脱水持续时间。"""
-        return min(self.thirst_max, int(value))
+        """钳制在 [thirst_min, thirst_max]；脱水计时在 0 时启动，不再继续扣成负数。"""
+        return max(self.thirst_min, min(self.thirst_max, int(value)))
 
     def _get_player_xuid(self, player) -> str:
         try:
@@ -1591,7 +1591,14 @@ class ARCRealisticSurvivalPlugin(Plugin):
                 "updated_at": datetime.datetime.utcnow().isoformat()
             })
         else:
-            self.player_xuid_to_thirst[xuid] = int(row["thirst"])
+            raw_thirst = int(row["thirst"])
+            clamped = self._clamp_thirst(raw_thirst)
+            self.player_xuid_to_thirst[xuid] = clamped
+            if clamped != raw_thirst:
+                self._safe_log(
+                    'warning',
+                    f"[ARCRealisticSurvival] 玩家 {player.name} 口渴值 {raw_thirst} 已修正为 {clamped}",
+                )
             self.player_xuid_to_dehydrated_since[xuid] = self._parse_dehydrated_since(
                 row.get("dehydrated_since")
             )
@@ -1672,12 +1679,12 @@ class ARCRealisticSurvivalPlugin(Plugin):
         apply_mob_effect(player, effect, 1, 255, particles=True, icon=True)
 
     def _sync_dehydration_state(self, player) -> None:
-        """口渴 < 0 时记录起始时间；持续超过 thirst_fatal_seconds 则瞬间伤害 255。"""
+        """口渴 <= 0 时记录起始时间；持续超过 thirst_fatal_seconds 则瞬间伤害 255。"""
         if not self._is_survival_like(player):
             return
         xuid = self._get_player_xuid(player)
         thirst = int(self.player_xuid_to_thirst.get(xuid, self.thirst_initial))
-        if thirst < 0:
+        if thirst <= 0:
             started = self.player_xuid_to_dehydrated_since.get(xuid)
             if started is None:
                 self.player_xuid_to_dehydrated_since[xuid] = time.time()
@@ -1708,14 +1715,23 @@ class ARCRealisticSurvivalPlugin(Plugin):
                     for player in self.server.online_players:
                         if player.game_mode != GameMode.SURVIVAL and player.game_mode != GameMode.ADVENTURE:
                             continue
-                        base_decay = self.thirst_decay_per_tick
-                        # 移动状态由最近移动事件标记
-                        moving_flag = getattr(player, '_arc_moving_flag', False)
-                        decay = base_decay if not moving_flag else int(math.ceil(base_decay * self.thirst_moving_multiplier))
-                        if decay > 0:
-                            self._apply_thirst_delta(player, -decay, reason="timer")
-                        else:
+                        xuid = self._get_player_xuid(player)
+                        current_thirst = int(
+                            self.player_xuid_to_thirst.get(xuid, self.thirst_initial)
+                        )
+                        if current_thirst <= 0:
                             self._sync_dehydration_state(player)
+                        else:
+                            base_decay = self.thirst_decay_per_tick
+                            # 移动状态由最近移动事件标记
+                            moving_flag = getattr(player, '_arc_moving_flag', False)
+                            decay = base_decay if not moving_flag else int(
+                                math.ceil(base_decay * self.thirst_moving_multiplier)
+                            )
+                            if decay > 0:
+                                self._apply_thirst_delta(player, -decay, reason="timer")
+                            else:
+                                self._sync_dehydration_state(player)
                         # 口渴未变时也重挂移速，避免 transient modifier 丢失后「0 口渴仍健步如飞」
                         self._apply_thirst_movement_modifier(player)
                         # 每次循环后重置移动标记
