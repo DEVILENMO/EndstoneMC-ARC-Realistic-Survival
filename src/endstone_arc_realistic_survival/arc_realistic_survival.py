@@ -1326,26 +1326,15 @@ class ARCRealisticSurvivalPlugin(Plugin):
         except Exception:
             return
         try:
-            self.server.scheduler.run_task(
-                self, lambda p=player: self._delayed_restore_sprint(p), delay=1
-            )
+            self._run_player_task(player, self._delayed_restore_sprint, delay=1)
         except Exception:
             pass
 
     def _delayed_restore_sprint(self, player) -> None:
         try:
-            if player is None:
+            if player is None or not hasattr(player, "is_sprinting"):
                 return
-            name = getattr(player, "name", None)
-            if not name:
-                return
-            try:
-                if self.server.get_player(name) is None:
-                    return
-            except Exception:
-                pass
-            if hasattr(player, "is_sprinting"):
-                player.is_sprinting = True
+            player.is_sprinting = True
         except Exception:
             pass
 
@@ -1563,6 +1552,32 @@ class ARCRealisticSurvivalPlugin(Plugin):
             return getattr(player, 'xuid', None) or getattr(player, 'uuid', None) or player.name
         except Exception:
             return player.name
+
+    def _resolve_online_player(self, xuid: str = "", name: str = ""):
+        xuid_s = str(xuid or "").strip()
+        if xuid_s:
+            for p in self.server.online_players or []:
+                if str(getattr(p, "xuid", "")) == xuid_s:
+                    return p
+        name_s = str(name or "").strip()
+        if name_s:
+            try:
+                return self.server.get_player(name_s)
+            except Exception:
+                return None
+        return None
+
+    def _run_player_task(self, player, fn, delay: int = 0):
+        xuid = str(getattr(player, "xuid", "") or "").strip()
+        name = str(getattr(player, "name", "") or "").strip()
+
+        def _wrapped() -> None:
+            p = self._resolve_online_player(xuid, name)
+            if p is None:
+                return
+            fn(p)
+
+        return self.server.scheduler.run_task(self, _wrapped, delay=delay)
 
     def _parse_dehydrated_since(self, raw) -> float | None:
         if raw is None or raw == "":

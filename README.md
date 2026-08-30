@@ -1,6 +1,6 @@
 # ARC Realistic Survival - 真实生存插件
 [![Codacy Grade](https://app.codacy.com/project/badge/Grade/035827370d734c539602adbeca85f6d4)](https://app.codacy.com/gh/DEVILENMO/EndstoneMC-ARC-Realistic-Survival/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
-[![Version](https://img.shields.io/badge/version-v0.3.28-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
+[![Version](https://img.shields.io/badge/version-v0.3.29-blue)](https://github.com/DEVILENMO/EndstoneMC-ARC-Realistic-Survival)
 
 
 一个为 Endstone 服务器打造的真实生存插件，添加口渴值、营养学、丧尸病毒、物品效果等功能，让生存体验更加真实有趣。
@@ -289,6 +289,9 @@ python -m build
 ```
 
 ## 📝 更新日志
+
+### v0.3.29
+- 修复定时任务 purecall 崩服：丧尸化延迟任务改用 `persist_by_xuid` 落库；口渴改速后恢复疾跑经 `_run_player_task` 重取在线玩家
 
 ### v0.3.28
 - 修复口渴到 0 后仍继续衰减成负数（如 -104），导致喝水看起来加不上的问题：口渴钳制在 0–100，严重脱水改为在 0 时计时；进服自动修正历史负值

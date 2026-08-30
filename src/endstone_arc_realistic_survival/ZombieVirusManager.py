@@ -246,6 +246,26 @@ class ZombieVirusManager:
         except Exception as e:
             self._log("error", f"[ARS] persist infection error: {e}")
 
+    def persist_by_xuid(self, xuid: str, player_name: str = "") -> None:
+        """按 xuid 落库感染值，不依赖可能已销毁的 Player 对象。"""
+        try:
+            xuid_s = str(xuid or "").strip()
+            if not xuid_s:
+                return
+            infection = self._clamp(float(self.player_infection.get(xuid_s, 0.0)))
+            exists = self.db_manager.query_one("SELECT xuid FROM player_infection WHERE xuid=?", (xuid_s,))
+            payload = {
+                "player_name": str(player_name or "").strip(),
+                "infection": infection,
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+            if exists is None:
+                self.db_manager.insert("player_infection", {"xuid": xuid_s, **payload})
+            else:
+                self.db_manager.update("player_infection", payload, "xuid=?", (xuid_s,))
+        except Exception as e:
+            self._log("error", f"[ARS] persist infection by xuid error: {e}")
+
     def set_infection(self, player, value: float) -> float:
         if not self.infection_enabled:
             raise RuntimeError("infection system disabled")
@@ -343,6 +363,7 @@ class ZombieVirusManager:
 
         loc = None
         dimension = None
+        player_name = str(getattr(player, "name", "") or "").strip()
         spawn_type = random.choice(self.infection_zombie_entities)
         try:
             loc = player.location
@@ -386,10 +407,7 @@ class ZombieVirusManager:
                 self._transforming.discard(xuid)
                 # 再保险清一次
                 self.player_infection[xuid] = 0.0
-                try:
-                    self.persist_player(player)
-                except Exception:
-                    pass
+                self.persist_by_xuid(xuid, player_name)
 
         try:
             self.plugin.server.scheduler.run_task(self.plugin, spawn_zombie, 5)
